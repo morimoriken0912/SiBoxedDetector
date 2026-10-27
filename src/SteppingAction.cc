@@ -21,6 +21,31 @@ SteppingAction::SteppingAction(EventAction* eventAction) : fEventAction(eventAct
 
 void SteppingAction::UserSteppingAction(const G4Step* step)
 {
+  G4Track* track = step->GetTrack();
+  if (track->GetCurrentStepNumber() == 1) {
+    G4String pName = track->GetDefinition()->GetParticleName();
+    G4String pType = track->GetDefinition()->GetParticleType(); // 粒子タイプを取得
+
+    if (pName == "alpha") {
+      fEventAction->AddGenAlpha();
+    }
+    else if (pName == "gamma") {
+      fEventAction->AddGenGamma();
+    }
+    else if (pName == "e-" || pName == "e+") {
+      fEventAction->AddGenElectron();
+    }
+    else if (pName == "Np225" || track->GetDefinition()->GetPDGEncoding() == 1000932250) {
+      fEventAction->AddGenHeavyIon(); // 225Np（ビーム粒子）のみをカウント
+    }
+    else if (pType == "nucleus") {
+      fEventAction->AddGenHeavyIon(); // その他の重イオンもカウント
+    }
+  }
+
+  // （以降の既存コード...）
+  // ↑↑↑ ここまで ↑↑↑
+
   if (!fScoringVolume) {
     const auto detConstruction = static_cast<const DetectorConstruction*>(
       G4RunManager::GetRunManager()->GetUserDetectorConstruction());
@@ -37,11 +62,13 @@ void SteppingAction::UserSteppingAction(const G4Step* step)
   G4double edep = step->GetTotalEnergyDeposit();
   if (edep <= 0.) return;
 
-  // 階層0 = SiSensitive、階層1 = SiElement。
-  // SiElement のコピー番号が素子ID (面番号*64 + ix*8 + iy, 0 〜 319)
   G4int pixelID = touchable->GetCopyNumber(1);
-
-  fEventAction->AddPixelEdep(pixelID, edep);
+  G4double hitTime = step->GetPreStepPoint()->GetGlobalTime();
+  
+  // ↓↓↓ 引数を追加 ↓↓↓
+  G4int pdg = track->GetDefinition()->GetPDGEncoding(); // 粒子の種類（PDGコード）を取得
+  fEventAction->AddPixelEdep(pixelID, edep, hitTime, pdg); // 4つ目の引数として渡す
+  // ↑↑↑ ここまで ↓↓↓
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......

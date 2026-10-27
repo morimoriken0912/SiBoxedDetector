@@ -9,13 +9,6 @@
 // 使い方 2: コンパイルして実行
 //   g++ -O2 -std=c++17 makeSiViewer.cc -o makeSiViewer $(root-config --cflags --libs)
 //   ./makeSiViewer SiDetector.root SiViewer.html
-//
-// 生成された HTML は外部ライブラリを使わず、データも HTML の中に埋め込まれる。
-// そのため、ブラウザで開くだけで表示できる (ネットワーク不要)。
-//
-// 読み込む ntuple:
-//   "hits"   : eventID, pixelID, face, ix, iy, edep [MeV]   (必須)
-//   "events" : イベント総数の取得にだけ使う                   (なくてもよい)
 
 #include <algorithm>
 #include <cstdio>
@@ -40,7 +33,7 @@ static const double kPitch = 8.0;  // 素子のピッチ [mm]
 static const double kPixSize = 7.5;  // 素子の1辺 [mm]
 static const double kSensSize = 7.05;  // 有感部の1辺 [mm]
 static const double kPixThick = 0.15;  // 素子の厚さ [mm]
-static const double kBinWidth = 0.25;  // ヒストグラムのビン幅 [MeV]
+static const double kBinWidth = 2.5;   // ヒストグラムのデフォルトビン幅 [MeV]
 
 // ---------------------------------------------------------------------------
 // HTML テンプレート。/*DATA_JSON*/null の部分にデータを埋め込む。
@@ -67,14 +60,14 @@ body{margin:0;padding:12px 16px;background:var(--bg);color:var(--fg);
   font:14px/1.55 system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI","Noto Sans JP",sans-serif}
 h1{font-size:18px;margin:0 0 2px}
 .sub{color:var(--muted);font-size:12px;margin-bottom:10px}
-.controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;margin-bottom:10px}
+.controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px;margin-bottom:10px}
 fieldset{border:1px solid var(--border);border-radius:8px;padding:6px 10px 8px;background:var(--panel);margin:0}
 legend{font-size:12px;color:var(--muted);padding:0 4px}
-label{margin-right:10px;white-space:nowrap}
-input[type=number]{width:86px}
-button{cursor:pointer;margin:2px 4px 2px 0}
-.main{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:12px}
-@media (max-width:1000px){.main{grid-template-columns:1fr}}
+label{margin-right:8px;white-space:nowrap;font-size:13px;}
+input[type=number]{width:80px}
+button{cursor:pointer;margin:2px 4px 2px 0; padding: 2px 8px;}
+.main{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1.25fr);gap:12px}
+@media (max-width:1100px){.main{grid-template-columns:1fr}}
 .views{display:flex;gap:8px}
 .vp{flex:1;min-width:0;border:1px solid var(--border);border-radius:8px;overflow:hidden}
 canvas{display:block;width:100%}
@@ -93,41 +86,85 @@ canvas{display:block;width:100%}
 <div class="sub" id="info"></div>
 
 <div class="controls">
+  <!-- 1段目 -->
   <fieldset>
-    <legend>表示する対象</legend>
-    <label><input type="radio" name="mode" value="imp">打ち込み</label>
-    <label><input type="radio" name="mode" value="dec">崩壊</label>
-    <label><input type="radio" name="mode" value="all" checked>同時（合算）</label>
-    <label><input type="radio" name="mode" value="split">並べて表示</label>
+    <legend>表示する対象と境界</legend>
+    <div style="margin-bottom:6px;">
+      <label><input type="radio" name="mode" value="imp">打ち込み</label>
+      <label><input type="radio" name="mode" value="dec">崩壊</label>
+      <label><input type="radio" name="mode" value="all" checked>同時（合算）</label>
+      <label><input type="radio" name="mode" value="split">並べて</label>
+    </div>
+    <div style="border-top: 1px solid var(--border); padding-top: 6px;">
+      <input type="number" id="thr" min="0" step="1" value="100"> MeV 以上を「打ち込み」とする
+    </div>
   </fieldset>
+  
+  <!-- 2段目 -->
   <fieldset>
-    <legend>打ち込み／崩壊の境界エネルギー</legend>
-    <input type="number" id="thr" min="0" step="1" value="100"> MeV 以上を「打ち込み」とする
+    <legend>3D表示設定</legend>
+    <div style="margin-bottom:4px;">
+      面：
+      <label><input type="checkbox" class="face" value="0" checked>+z</label>
+      <label><input type="checkbox" class="face" value="1" checked>+x</label>
+      <label><input type="checkbox" class="face" value="2" checked>−x</label>
+      <label><input type="checkbox" class="face" value="3" checked>+y</label>
+      <label><input type="checkbox" class="face" value="4" checked>−y</label>
+    </div>
+    <div style="margin-bottom:4px;">
+      <label>不透明度 <input type="range" id="alpha" min="15" max="100" value="100" style="width:80px; vertical-align:middle;"></label>
+      <label><input type="checkbox" id="logc">色を対数</label>
+    </div>
+    <div>
+      視点：
+      <button data-view="in">入口から</button>
+      <button data-view="obl">斜め</button>
+      <button data-view="back">背面</button>
+    </div>
   </fieldset>
-  <fieldset>
-    <legend>エネルギー範囲（検出したヒットの絞り込み）</legend>
-    <input type="number" id="emin" min="0" step="0.25"> 〜
-    <input type="number" id="emax" min="0" step="0.25"> MeV<br>
-    <button id="btnAll">全範囲</button>
-    <button id="btnDec">崩壊の帯</button>
-    <button id="btnImp">打ち込みの帯</button>
-    <button id="btnZoom">選択範囲を拡大</button>
+
+  <!-- 粒子選択・検出効率の拡張 -->
+  <fieldset style="border-color:#8b5cf6; background:rgba(139,92,246,0.05);">
+    <legend style="color:#8b5cf6; font-weight:bold;">粒子選択・検出効率</legend>
+    <div style="margin-bottom:6px; display:flex; flex-wrap:wrap; gap:4px;">
+      <label><input type="radio" name="ptype" value="all" checked> 全て</label>
+      <label><input type="radio" name="ptype" value="alpha"> α線</label>
+      <label><input type="radio" name="ptype" value="gamma"> γ線</label>
+      <label><input type="radio" name="ptype" value="electron"> ベータ線(e±)</label>
+      <label><input type="radio" name="ptype" value="heavy"> 重イオン</label>
+    </div>
+    <div style="border-top: 1px solid var(--border); padding-top: 4px; line-height:1.3; font-size:12px;" id="effDisplay">
+      検出効率: ---
+    </div>
   </fieldset>
-  <fieldset>
-    <legend>表示設定</legend>
-    面：
-    <label><input type="checkbox" class="face" value="0" checked>+z</label>
-    <label><input type="checkbox" class="face" value="1" checked>+x</label>
-    <label><input type="checkbox" class="face" value="2" checked>−x</label>
-    <label><input type="checkbox" class="face" value="3" checked>+y</label>
-    <label><input type="checkbox" class="face" value="4" checked>−y</label><br>
-    <label>不透明度 <input type="range" id="alpha" min="15" max="100" value="100"></label>
-    <label><input type="checkbox" id="logc">色を対数スケール</label>
-    <label><input type="checkbox" id="logy" checked>ヒストグラムを対数軸</label><br>
-    視点：
-    <button data-view="in">入口から</button>
-    <button data-view="obl">斜め</button>
-    <button data-view="back">背面（外側）</button>
+
+  <!-- イベント・ピクセル選択統合枠 -->
+  <fieldset style="border-color:#0d9488; background:rgba(13,148,136,0.05);">
+    <legend style="color:#0d9488; font-weight:bold;">イベント・ピクセル選択</legend>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+      <div>
+        <label><input type="checkbox" id="chkAllEv" checked> <b>全イベントを合算</b></label>
+        <div id="evControls" style="opacity: 0.4; pointer-events: none; margin-top: 8px; display:flex; flex-direction:column; gap:6px;">
+          <div>
+            eventID: <input type="number" id="evNum" min="0" max="0" value="0">
+          </div>
+          <div style="display:flex; align-items:center; gap:4px; font-size:12px;">
+            eventID: <input type="range" id="evSlider" min="0" max="0" value="0" style="flex:1;">
+          </div>
+        </div>
+      </div>
+      <div>
+        <label><input type="checkbox" id="chkAllPix" checked> <b>全ピクセルを合算</b></label>
+        <div id="pixControls" style="opacity: 0.4; pointer-events: none; margin-top: 8px; display:flex; flex-direction:column; gap:6px;">
+          <div>
+            pixelID (0〜319): <input type="number" id="pixNum" min="0" max="319" value="0">
+          </div>
+          <div style="display:flex; align-items:center; gap:4px; font-size:12px;">
+            pixelID: <input type="range" id="pixSlider" min="0" max="319" value="0" style="flex:1;">
+          </div>
+        </div>
+      </div>
+    </div>
   </fieldset>
 </div>
 
@@ -142,20 +179,79 @@ canvas{display:block;width:100%}
       <span>1</span><div class="bar" id="bar"></div><span id="lgmax">最大</span>
       <span id="lgnote"></span>
     </div>
-    <div class="note">3D：ドラッグで回転／ホイールで拡大縮小／ダブルクリックで視点リセット／素子にマウスを載せると詳細を表示。
-      色は「その素子がヒットを記録したイベント数」を表します（1イベントでも検出で青、多いほど赤）。</div>
+    <div class="note">3D：ドラッグで回転／ホイールで拡大縮小／ダブルクリックで視点リセット／素子にマウスを載せると詳細を表示。</div>
   </div>
-  <div class="panel">
-    <canvas id="hist"></canvas>
-    <div class="stats" id="stats"></div>
-    <div class="note">ヒストグラム：ドラッグでエネルギー範囲を選択／ホイールで横軸の拡大縮小／縦の破線は打ち込み・崩壊の境界。
-      縦軸は素子ごと・イベントごとのヒット数です。</div>
+  
+  <div style="display:flex; flex-direction:column; gap:12px;">
+    <!-- エネルギーヒストグラム -->
+    <div class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:6px;">
+        <div style="font-weight:bold;">エネルギー分布</div>
+        <div style="font-size:12px;">
+          <label style="margin-right:8px;">ビン幅: <input type="number" id="binw" min="0.1" step="0.1" value="2.5" style="width:64px;"> MeV</label>
+          <button id="btnLogY" style="margin:0;">Y軸: 対数 (Log)</button>
+        </div>
+      </div>
+      <canvas id="hist"></canvas>
+      <div class="stats" id="stats"></div>
+
+      <!-- ★ エネルギー範囲のコントロールをここに移動 -->
+      <fieldset style="border-color:#5f6b7a; background:rgba(95,107,122,0.05); margin-top:8px;">
+        <legend style="color:#5f6b7a; font-weight:bold;">エネルギー範囲（ヒットの絞り込み）</legend>
+        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+          <div>
+            <input type="number" id="emin" min="0" step="0.25" style="width:64px;"> 〜
+            <input type="number" id="emax" min="0" step="0.25" style="width:64px;"> MeV
+          </div>
+          <div>
+            <button id="btnAll">全範囲</button>
+            <button id="btnDec">崩壊の帯</button>
+            <button id="btnImp">打ち込みの帯</button>
+            <button id="btnZoom">選択範囲拡大</button>
+          </div>
+        </div>
+      </fieldset>
+
+      <div class="note" style="margin-top:6px;">※上のヒストグラムをドラッグしてエネルギー範囲を選択／ホイールで横軸の拡大縮小／縦の破線は境界。</div>
+    </div>
+
+    <!-- 時間ヒストグラム -->
+    <div class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:6px;">
+        <div style="font-weight:bold;">時間分布</div>
+        <div style="font-size:12px;">
+          <button id="btnLogXTime" style="margin:0 4px 0 0;">X軸: 線形 (Linear)</button>
+          <button id="btnLogYTime" style="margin:0;">Y軸: 対数 (Log)</button>
+        </div>
+      </div>
+      <canvas id="histTime"></canvas>
+      
+      <fieldset style="border-color:#e8710a; background:rgba(232,113,10,0.05); margin-top:12px;">
+        <legend style="color:#e8710a; font-weight:bold;">時間フィルタ・再生（Time Window & Play）</legend>
+        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+          <div>
+            対象とする全時間幅:
+            <input type="number" id="tmin" step="0.1"> 〜
+            <input type="number" id="tmax" step="0.1"> µs
+          </div>
+          <button id="btnAllTime">全時間リセット</button>
+          <span class="note" id="timeInfo" style="margin:0;"></span>
+        </div>
+        <div style="margin-top:8px; display:flex; align-items:center; gap:8px;">
+          <button id="btnPlayTime" style="width:60px; font-weight:bold; color:#e8710a;">再生</button>
+          <input type="range" id="timeSlider" min="0" max="1000" value="1000" style="flex:1; cursor:pointer;">
+          <span style="font-variant-numeric: tabular-nums; width: 140px; text-align:right;">
+            現在: <b id="timeCurrentDisplay" style="color:#e8710a;">0.00</b> µs
+          </span>
+        </div>
+        <div class="note" style="margin-top:6px;">※スケールバー（スライダー）は対数スケール（Log）で動きます。再生ボタンで15秒かけてヒットを積算表示します。上のヒストグラムをドラッグして時間範囲を絞ることも可能です。</div>
+      </fieldset>
+    </div>
   </div>
 </div>
-<div class="note" id="caveat">
-  ※ ROOT ファイルには粒子の種類と時刻が記録されていないため、「打ち込み」と「崩壊」はエネルギーで判定しています。
-  1素子のエネルギーが境界エネルギー以上のヒットを「打ち込み」（イオンが止まった素子。同じ素子に入った崩壊のエネルギーも含む）、
-  未満のヒットを「崩壊」（α線などが当たった素子）としています。
+<div class="note" id="caveat" style="margin-top:10px;">
+  ※ 1素子のエネルギーが境界エネルギー以上のヒットを「打ち込み」（イオンが止まった素子。同じ素子に入った崩壊のエネルギーも含む）、未満のヒットを「崩壊」としています。<br>
+  ※ 粒子選択で「α線」を絞り込んだ場合、そのα線のみのヒット情報に基づきカウントされます。
 </div>
 <div id="tip"></div>
 
@@ -165,37 +261,93 @@ canvas{display:block;width:100%}
 var DATA = /*DATA_JSON*/null;
 
 var G = DATA.geom;
-var EV = DATA.ev, PIX = DATA.pix, EN = DATA.e;
+var EV = DATA.ev, PIX = DATA.pix, EN = DATA.e, T = DATA.t, PDG = DATA.pdg;
 var N = PIX.length;
 var NPIX = G.nPix, NPF = NPIX * NPIX, NFACE = 5, NTOT = NFACE * NPF;
-var BW = DATA.binWidth;
 var FACE_NAMES = ['+z（奥の壁）', '+x（側面）', '−x（側面）', '+y（側面）', '−y（側面）'];
-var VH = 520;   // 3D表示の高さ [px]
-var HH = 300;   // ヒストグラムの高さ [px]
-var HL = 56, HR = 12, HT = 14, HB = 34;   // ヒストグラムの余白
-var DEAD = '#b9bfc8';                     // 不感部の色
+var VH = 520;
+var HH = 220;
+var HL = 64, HR = 12, HT = 14, HB = 34;
+var DEAD = '#b9bfc8';
 
 function $(id){ return document.getElementById(id); }
 function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
 function css(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
-// ---- データの範囲 ----
-var EMAX = 0, MAXEV = 0, i;
-for (i = 0; i < N; i++) { if (EN[i] > EMAX) EMAX = EN[i]; if (EV[i] > MAXEV) MAXEV = EV[i]; }
-if (!(EMAX > 0)) EMAX = 1;
-EMAX = Math.ceil(EMAX / BW) * BW;
-var NB = Math.round(EMAX / BW) + 1;
+function fmt(v){ 
+  if (v === 0) return "0";
+  var absV = Math.abs(v);
+  if (absV >= 10000 || (absV > 0 && absV < 0.001)) {
+    return v.toExponential(1).replace('e', 'E').replace('+', '+'); 
+  }
+  return (absV >= 100 || v === Math.round(v)) ? String(Math.round(v * 100) / 100) : v.toFixed(2); 
+}
 
-// ---- 状態 ----
+var rawEmax = 0, MAXEV = 0, rawTmin = Infinity, rawTmax = -Infinity, i;
+for (i = 0; i < N; i++) { 
+  if (EN[i] > rawEmax) rawEmax = EN[i]; 
+  if (EV[i] > MAXEV) MAXEV = EV[i]; 
+  if (T[i] < rawTmin) rawTmin = T[i];
+  if (T[i] > rawTmax) rawTmax = T[i];
+}
+if (!(rawEmax > 0)) rawEmax = 1;
+if (rawTmin === Infinity) { rawTmin = 0; rawTmax = 100; }
+
+var BW = DATA.binWidth || 2.5;
+$('binw').value = BW;
+var EMAX = rawEmax;
+var NB = 1;
+
+$('evSlider').max = MAXEV;
+$('evNum').max = MAXEV;
+$('pixNum').max = NTOT - 1;
+$('pixSlider').max = NTOT - 1;
+
 var S = {
+  ptype: 'all', // 'all', 'alpha', 'gamma', 'electron', 'heavy'
+  showAllEv: true, evID: 0,
+  showAllPix: true, pixID: 0,
   mode: 'all', thr: 100, emin: 0, emax: EMAX, vmin: 0, vmax: EMAX,
+  tmin: rawTmin, tmax: rawTmax, tcurrent: rawTmax,
+  logxTime: false, logyTime: true,
   yaw: 190 * Math.PI / 180, pitch: 10 * Math.PI / 180, zoom: 1,
   faceOn: [true, true, true, true, true], alpha: 1, logc: false, logy: true
 };
 var YAW0 = S.yaw, PITCH0 = S.pitch;
 var VIEWS = {'in': [190, 10], 'obl': [155, 22], 'back': [-25, 20]};
 
-// ---- 素子の幾何 ----
+var T_EPS = 1e-3;
+function timeToSlider(t) {
+  var lmin = Math.log(S.tmin + T_EPS);
+  var lmax = Math.log(S.tmax + T_EPS);
+  if (lmax <= lmin) return 1000;
+  var lt = Math.log(t + T_EPS);
+  var v = (lt - lmin) / (lmax - lmin) * 1000;
+  return clamp(v, 0, 1000);
+}
+function sliderToTime(v) {
+  var lmin = Math.log(S.tmin + T_EPS);
+  var lmax = Math.log(S.tmax + T_EPS);
+  if (lmax <= lmin) return S.tmax;
+  var lt = lmin + (v / 1000) * (lmax - lmin);
+  return clamp(Math.exp(lt) - T_EPS, S.tmin, S.tmax);
+}
+
+// 粒子判定ヘルパー
+function getParticleCategory(pdg) {
+  if (pdg === 1000020040) return 'alpha';
+  if (pdg === 22) return 'gamma';
+  if (pdg === 11 || pdg === -11) return 'electron';
+  if (pdg === 1000932250) return 'heavy'; // 225Np イオン（ビーム粒子）
+  return 'other';
+}
+
+function matchParticleFilter(pdg) {
+  if (S.ptype === 'all') return true;
+  var cat = getParticleCategory(pdg);
+  return cat === S.ptype;
+}
+
 function quad(c, a, b, h){
   var s = [[-1,-1],[1,-1],[1,1],[-1,1]], out = [], k;
   for (k = 0; k < 4; k++) {
@@ -224,28 +376,50 @@ function buildElements(){
 }
 var ELS = buildElements();
 
-// ---- 集計 ----
-var C = {imp: new Int32Array(NTOT), dec: new Int32Array(NTOT)};
+var C = {imp: new Int32Array(NTOT), dec: new Int32Array(NTOT), detCounts: 0};
 var EVSEEN = {imp: new Uint8Array(MAXEV + 1), dec: new Uint8Array(MAXEV + 1)};
 var HIST_IMP = null, HIST_DEC = null;
 
 function computeCounts(){
-  C.imp.fill(0); C.dec.fill(0);
+  C.imp.fill(0); C.dec.fill(0); C.detCounts = 0;
   EVSEEN.imp.fill(0); EVSEEN.dec.fill(0);
   var k;
   for (k = 0; k < N; k++) {
-    var e = EN[k];
-    if (e < S.emin || e > S.emax) continue;
+    var pdgCode = PDG ? PDG[k] : 0;
+    if (!matchParticleFilter(pdgCode)) continue;
+
+    if (!S.showAllEv && EV[k] !== S.evID) continue;
     var p = PIX[k];
+    if (!S.showAllPix && p !== S.pixID) continue;
+
+    var e = EN[k], t = T[k];
+    if (e < S.emin || e > S.emax) continue;
+    if (t < S.tmin || t > S.tcurrent) continue; 
+    
     if (p < 0 || p >= NTOT) continue;
+
+    C.detCounts++;
+
     if (e >= S.thr) { C.imp[p]++; EVSEEN.imp[EV[k]] = 1; }
     else            { C.dec[p]++; EVSEEN.dec[EV[k]] = 1; }
   }
 }
 function buildHist(){
+  BW = Math.max(0.01, parseFloat($('binw').value) || DATA.binWidth || 2.5);
+  EMAX = Math.ceil(rawEmax / BW) * BW;
+  NB = Math.round(EMAX / BW) + 1;
   HIST_IMP = new Float64Array(NB); HIST_DEC = new Float64Array(NB);
   var k;
   for (k = 0; k < N; k++) {
+    var pdgCode = PDG ? PDG[k] : 0;
+    if (!matchParticleFilter(pdgCode)) continue;
+
+    if (!S.showAllEv && EV[k] !== S.evID) continue;
+    if (!S.showAllPix && PIX[k] !== S.pixID) continue;
+    
+    var t = T[k];
+    if (t < S.tmin || t > S.tcurrent) continue; 
+    
     var b = Math.min(NB - 1, Math.max(0, Math.floor(EN[k] / BW)));
     if (EN[k] >= S.thr) HIST_IMP[b]++; else HIST_DEC[b]++;
   }
@@ -264,7 +438,6 @@ function maxCountFor(cats){
   return m;
 }
 
-// ---- 色 ----
 function colorOf(n, max){
   if (n <= 0) return '#ffffff';
   var t = 0;
@@ -273,7 +446,6 @@ function colorOf(n, max){
   return 'hsl(' + (240 * (1 - t)).toFixed(1) + ',90%,50%)';
 }
 
-// ---- キャンバス ----
 function fit(cv, cssH){
   var dpr = window.devicePixelRatio || 1;
   var w = Math.max(120, Math.floor(cv.getBoundingClientRect().width));
@@ -298,7 +470,6 @@ function inPoly(p, x, y){
   return c;
 }
 
-// ---- 3D ----
 var panels = [
   {cv: $('cv0'), cat: 'all', label: '', hits: []},
   {cv: $('cv1'), cat: 'dec', label: '', hits: []}
@@ -342,7 +513,6 @@ function drawPanel(P, max){
   ctx.globalAlpha = 1;
   var fg = css('--fg');
 
-  // ビームの矢印 (開放面 z = -32 mm の外側から入射)
   var half = NPIX * G.pitch / 2;
   var a = V.proj([0, 0, -half - 30]), b = V.proj([0, 0, -half - 2]);
   ctx.strokeStyle = fg; ctx.fillStyle = fg; ctx.lineWidth = 2;
@@ -355,7 +525,6 @@ function drawPanel(P, max){
   ctx.font = '12px system-ui, sans-serif';
   ctx.fillText('ビーム', a[0] + 6, a[1] - 6);
 
-  // 座標軸
   var ax = [['x', [1,0,0], '#d1382b'], ['y', [0,1,0], '#2c9a3f'], ['z', [0,0,1], '#2b6fd6']];
   var ox = 46, oy = H - 40, q;
   for (q = 0; q < 3; q++) {
@@ -371,10 +540,12 @@ function drawPanel(P, max){
 function draw3D(){
   var split = S.mode === 'split';
   $('vp1').style.display = split ? 'block' : 'none';
+  
+  var labEv = S.showAllEv ? '' : '（Event ' + S.evID + '）';
   var lab = {
-    imp: '打ち込み（' + S.thr + ' MeV 以上のヒット）',
-    dec: '崩壊（' + S.thr + ' MeV 未満のヒット）',
-    all: '同時表示（打ち込み＋崩壊）'
+    imp: '打ち込み' + labEv,
+    dec: '崩壊' + labEv,
+    all: '同時表示' + labEv
   };
   panels[0].cat = split ? 'imp' : S.mode;
   panels[1].cat = 'dec';
@@ -393,7 +564,6 @@ function updateLegend(max){
   $('lgnote').textContent = S.logc ? '（対数スケール）' : '（線形スケール）';
 }
 
-// ---- ツールチップ ----
 var tip = $('tip');
 function showTip(P, e){
   var r = P.cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top, h = null, k;
@@ -403,25 +573,24 @@ function showTip(P, e){
   tip.textContent =
     'pixelID ' + el.id + '\n' + FACE_NAMES[el.face] + '  ix=' + el.ix + ', iy=' + el.iy + '\n' +
     '中心 (' + el.c.map(function(v){ return v.toFixed(1); }).join(', ') + ') mm\n' +
-    '選択範囲内の検出数\n  打ち込み ' + C.imp[el.id] + ' ／ 崩壊 ' + C.dec[el.id];
+    '現在の表示での検出数\n  打ち込み ' + C.imp[el.id] + ' ／ 崩壊 ' + C.dec[el.id];
   tip.style.left = (e.clientX + 14) + 'px';
   tip.style.top = (e.clientY + 14) + 'px';
   tip.style.display = 'block';
 }
 
-// ---- ヒストグラム ----
 function niceStep(range, n){
   var raw = range / n, p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p;
   return (m < 1.5 ? 1 : m < 3 ? 2 : m < 7 ? 5 : 10) * p;
 }
-function fmt(v){ return (Math.abs(v) >= 100 || v === Math.round(v)) ? String(Math.round(v * 100) / 100) : v.toFixed(2); }
+
 function drawHist(){
   var cv = $('hist'), f = fit(cv, HH), ctx = f.ctx, W = f.w, H = f.h;
   var pw = W - HL - HR, ph = H - HT - HB;
   ctx.globalAlpha = 1;
   ctx.fillStyle = css('--cbg'); ctx.fillRect(0, 0, W, H);
   var range = S.vmax - S.vmin;
-  var k = Math.max(1, Math.ceil(2 * range / (BW * pw)));
+  var k = 1; 
   var gw = k * BW;
   var g0 = Math.floor(S.vmin / gw), g1 = Math.ceil(S.vmax / gw);
   var bars = [], ymax = 1, g, j;
@@ -442,7 +611,7 @@ function drawHist(){
 
   ctx.font = '11px system-ui, sans-serif';
   ctx.lineWidth = 1;
-  // 縦軸の目盛り
+  
   var yt = [], v;
   if (S.logy) { for (v = 1; v <= top; v *= 10) yt.push(v); }
   else { var ys = niceStep(top, 4); for (v = 0; v <= top; v += ys) yt.push(v); }
@@ -453,7 +622,7 @@ function drawHist(){
     ctx.beginPath(); ctx.moveTo(HL, yy); ctx.lineTo(HL + pw, yy); ctx.stroke();
     ctx.fillStyle = muted; ctx.fillText(fmt(yt[j]), HL - 6, yy);
   }
-  // 横軸の目盛り
+  
   var xs = niceStep(range, 7), x0 = Math.ceil(S.vmin / xs) * xs;
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   for (v = x0; v <= S.vmax + 1e-9; v += xs) {
@@ -463,7 +632,6 @@ function drawHist(){
     ctx.fillStyle = muted; ctx.fillText(fmt(v), xx, HT + ph + 5);
   }
 
-  // 棒
   ctx.save();
   ctx.beginPath(); ctx.rect(HL, HT, pw, ph); ctx.clip();
   var sx0 = xOf(S.emin), sx1 = xOf(S.emax);
@@ -474,30 +642,161 @@ function drawHist(){
     if (bars[j][2] > 0) { ctx.fillStyle = cDec; ctx.fillRect(bx0, HT + ph - yOf(bars[j][2]), bw, yOf(bars[j][2])); }
     if (bars[j][1] > 0) { ctx.fillStyle = cImp; ctx.fillRect(bx0, HT + ph - yOf(bars[j][1]), bw, yOf(bars[j][1])); }
   }
-  // 選択範囲の境界線
   if (partial) {
     ctx.strokeStyle = 'rgba(70,110,255,0.9)'; ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.moveTo(sx0, HT); ctx.lineTo(sx0, HT + ph); ctx.moveTo(sx1, HT); ctx.lineTo(sx1, HT + ph); ctx.stroke();
   }
-  // 打ち込み／崩壊の境界
   var tx = xOf(S.thr);
   ctx.setLineDash([5, 4]); ctx.strokeStyle = fg; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(tx, HT); ctx.lineTo(tx, HT + ph); ctx.stroke(); ctx.setLineDash([]);
   ctx.restore();
 
-  // 枠・軸ラベル
   ctx.strokeStyle = muted; ctx.lineWidth = 1; ctx.strokeRect(HL, HT, pw, ph);
   ctx.fillStyle = fg; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   ctx.font = '12px system-ui, sans-serif';
-  ctx.fillText('エネルギー [MeV]（素子ごとの検出エネルギー）', HL + pw / 2, H - 6);
+  ctx.fillText('エネルギー [MeV]', HL + pw / 2, H - 6);
+  
+  ctx.save();
+  ctx.translate(16, HT + ph / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center';
+  ctx.fillText('ヒット数 (counts)' + (S.logy ? ' (対数)' : ''), 0, 0);
+  ctx.restore();
+
   ctx.textAlign = 'right';
   ctx.fillStyle = cImp; ctx.fillText('■ 打ち込み', HL + pw - 78, HT + 14);
   ctx.fillStyle = cDec; ctx.fillText('■ 崩壊', HL + pw - 8, HT + 14);
-  ctx.fillStyle = muted; ctx.textAlign = 'left';
-  ctx.fillText('ビン幅 ' + fmt(gw) + ' MeV', HL + 6, HT + 14);
 }
 
-// ---- 統計表示 ----
+function drawTimeHist() {
+  var cv = $('histTime'), f = fit(cv, HH), ctx = f.ctx, W = f.w, H = f.h;
+  var pw = W - HL - HR, ph = H - HT - HB;
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = css('--cbg'); ctx.fillRect(0, 0, W, H);
+  
+  var tmin_view = 0;
+  var tmax_view = Math.max(rawTmax, 1);
+  
+  var logX = S.logxTime;
+  var LMIN = Math.log10(T_EPS);
+  var LMAX = Math.log10(tmax_view + T_EPS);
+  
+  function xOf(t) {
+    if (logX) {
+      return HL + (Math.log10(t + T_EPS) - LMIN) / (LMAX - LMIN) * pw;
+    } else {
+      return HL + (t - tmin_view) / (tmax_view - tmin_view) * pw;
+    }
+  }
+  
+  var binsI = new Float64Array(Math.ceil(pw));
+  var binsD = new Float64Array(Math.ceil(pw));
+  var ymax = 1;
+  
+  for (var k = 0; k < N; k++) {
+    var pdgCode = PDG ? PDG[k] : 0;
+    if (!matchParticleFilter(pdgCode)) continue;
+
+    if (!S.showAllEv && EV[k] !== S.evID) continue;
+    if (!S.showAllPix && PIX[k] !== S.pixID) continue;
+    
+    var e = EN[k];
+    if (e < S.emin || e > S.emax) continue;
+    
+    var t = T[k];
+    var xpx = Math.floor(xOf(t) - HL);
+    if (xpx >= 0 && xpx < pw) {
+      if (e >= S.thr) {
+        binsI[xpx]++;
+        if (binsI[xpx] > ymax) ymax = binsI[xpx];
+      } else {
+        binsD[xpx]++;
+        if (binsD[xpx] > ymax) ymax = binsD[xpx];
+      }
+    }
+  }
+  
+  var top = S.logyTime ? ymax * 1.5 : ymax * 1.08;
+  var lo = Math.log10(0.5), hi = Math.log10(top);
+  function yOf(c){
+    if (c <= 0) return 0;
+    var t = S.logyTime ? (Math.log10(c) - lo) / (hi - lo) : c / top;
+    return Math.max(1, t * ph);
+  }
+  
+  var fg = css('--fg'), muted = css('--muted'), cImp = css('--imp'), cDec = css('--dec');
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.lineWidth = 1;
+  
+  var yt = [], v, j;
+  if (S.logyTime) { for (v = 1; v <= top; v *= 10) yt.push(v); }
+  else { var ys = niceStep(top, 4); for (v = 0; v <= top; v += ys) yt.push(v); }
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (j = 0; j < yt.length; j++) {
+    var yy = HT + ph - (yt[j] === 0 ? 0 : yOf(yt[j]));
+    ctx.strokeStyle = 'rgba(128,136,148,0.28)';
+    ctx.beginPath(); ctx.moveTo(HL, yy); ctx.lineTo(HL + pw, yy); ctx.stroke();
+    ctx.fillStyle = muted; ctx.fillText(fmt(yt[j]), HL - 6, yy);
+  }
+  
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  if (logX) {
+    for (var p = Math.floor(LMIN); p <= Math.ceil(LMAX); p++) {
+      var val = Math.pow(10, p) - T_EPS;
+      if (val < 0) val = 0;
+      var xx = xOf(val);
+      if (xx >= HL && xx <= HL + pw) {
+        ctx.strokeStyle = 'rgba(128,136,148,0.28)';
+        ctx.beginPath(); ctx.moveTo(xx, HT); ctx.lineTo(xx, HT + ph); ctx.stroke();
+        ctx.fillStyle = muted; ctx.fillText(fmt(val), xx, HT + ph + 5);
+      }
+    }
+  } else {
+    var range = tmax_view - tmin_view;
+    var xs = niceStep(range, 7), x0 = Math.ceil(tmin_view / xs) * xs;
+    for (v = x0; v <= tmax_view + 1e-9; v += xs) {
+      var xx = xOf(v);
+      ctx.strokeStyle = 'rgba(128,136,148,0.28)';
+      ctx.beginPath(); ctx.moveTo(xx, HT); ctx.lineTo(xx, HT + ph); ctx.stroke();
+      ctx.fillStyle = muted; ctx.fillText(fmt(v), xx, HT + ph + 5);
+    }
+  }
+
+  ctx.save();
+  ctx.beginPath(); ctx.rect(HL, HT, pw, ph); ctx.clip();
+  
+  var sx0 = xOf(S.tmin), sx1 = xOf(S.tcurrent);
+  if (sx0 > sx1) { var tmp = sx0; sx0 = sx1; sx1 = tmp; }
+  ctx.fillStyle = css('--sel'); 
+  ctx.fillRect(sx0, HT, Math.max(1, sx1 - sx0), ph);
+  
+  for (var px = 0; px < pw; px++) {
+    var bx0 = HL + px, bw = 1.5;
+    if (binsD[px] > 0) { ctx.fillStyle = cDec; ctx.fillRect(bx0, HT + ph - yOf(binsD[px]), bw, yOf(binsD[px])); }
+    if (binsI[px] > 0) { ctx.fillStyle = cImp; ctx.fillRect(bx0, HT + ph - yOf(binsI[px]), bw, yOf(binsI[px])); }
+  }
+  
+  ctx.strokeStyle = 'rgba(70,110,255,0.9)'; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.moveTo(sx0, HT); ctx.lineTo(sx0, HT + ph); ctx.moveTo(sx1, HT); ctx.lineTo(sx1, HT + ph); ctx.stroke();
+  ctx.restore();
+
+  ctx.strokeStyle = muted; ctx.lineWidth = 1; ctx.strokeRect(HL, HT, pw, ph);
+  ctx.fillStyle = fg; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.fillText('時間 [µs]' + (S.logxTime ? ' (対数)' : ''), HL + pw / 2, H - 6);
+  
+  ctx.save();
+  ctx.translate(16, HT + ph / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center';
+  ctx.fillText('ヒット数 (counts)' + (S.logyTime ? ' (対数)' : ''), 0, 0);
+  ctx.restore();
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = cImp; ctx.fillText('■ 打ち込み', HL + pw - 78, HT + 14);
+  ctx.fillStyle = cDec; ctx.fillText('■ 崩壊', HL + pw - 8, HT + 14);
+}
+
 function updateStats(){
   var nImp = 0, nDec = 0, det = 0, id, mx = 0, evI = 0, evD = 0, evA = 0, k;
   for (id = 0; id < NTOT; id++) {
@@ -511,18 +810,53 @@ function updateStats(){
     if (EVSEEN.dec[k]) evD++;
     if (EVSEEN.imp[k] || EVSEEN.dec[k]) evA++;
   }
-  var ne = DATA.nEvents;
+  
+  var evText = S.showAllEv 
+    ? 'ヒットイベント：<b>' + evA + '</b> / ' + DATA.nEvents + '（打ち込み ' + evI + '、崩壊 ' + evD + '）'
+    : '表示中のイベント: <b>Event ' + S.evID + '</b>';
+
+  var pixText = S.showAllPix 
+    ? '検出した素子：<b>' + det + '</b> / ' + NTOT + '<br>'
+    : '表示中の素子：<b>pixelID ' + S.pixID + '</b> のみ<br>';
+
   $('stats').innerHTML =
-    '選択範囲 <b>' + fmt(S.emin) + '〜' + fmt(S.emax) + ' MeV</b><br>' +
-    'ヒット数：打ち込み <b>' + nImp + '</b>／崩壊 <b>' + nDec + '</b>（全 ' + N + ' ヒット中）<br>' +
-    '検出した素子：<b>' + det + '</b> / ' + NTOT + '（素子あたり最大 ' + mx + ' イベント）<br>' +
-    'ヒットのあったイベント：<b>' + evA + '</b> / ' + ne +
-    '（打ち込み ' + evI + '、崩壊 ' + evD + '）';
+    '選択範囲 <b>' + fmt(S.emin) + '〜' + fmt(S.emax) + ' MeV</b> ／ ' +
+    '積算時間 <b>' + fmt(S.tmin) + '〜' + fmt(S.tcurrent) + ' µs</b> <span style="color:#888;">(設定枠: ' + fmt(S.tmax) + ' µs)</span><br>' +
+    'ヒット数：打ち込み <b>' + nImp + '</b> ／ 崩壊 <b>' + nDec + '</b><br>' +
+    pixText +
+    evText;
+
+  var ptype = S.ptype;
+  var genTotal = 0;
+  var pLabel = "";
+  
+  if (ptype === 'alpha') { 
+    genTotal = DATA.nGenAlphas; 
+    pLabel = "α線"; 
+  }
+  else if (ptype === 'gamma') { 
+    genTotal = DATA.nGenGammas; 
+    pLabel = "γ線"; 
+  }
+  else if (ptype === 'electron') { 
+    genTotal = DATA.nGenElectrons; 
+    pLabel = "ベータ線(e±)"; 
+  }
+  else if (ptype === 'heavy') { 
+    genTotal = DATA.nEvents; 
+    pLabel = "重イオン(ビーム)"; 
+  }
+
+  if (ptype !== 'all') {
+    var eff = genTotal > 0 ? (C.detCounts / genTotal * 100).toFixed(2) : "0.00";
+    $('effDisplay').innerHTML = pLabel + ' 検出効率: <b>' + eff + '%</b><br><span style="font-size:11px;color:#888;">(検出: ' + C.detCounts + ' / 基準総数: ' + genTotal + ')</span>';
+  } else {
+    $('effDisplay').innerHTML = '検出効率: 粒子を選択してください';
+  }
 }
 
-// ---- 更新 ----
 var pendRefresh = false, pend3D = false;
-function refresh(){ computeCounts(); draw3D(); drawHist(); updateStats(); }
+function refresh(){ computeCounts(); draw3D(); buildHist(); drawHist(); drawTimeHist(); updateStats(); }
 function scheduleRefresh(){
   if (pendRefresh) return; pendRefresh = true;
   requestAnimationFrame(function(){ pendRefresh = false; refresh(); });
@@ -534,9 +868,168 @@ function scheduleDraw3D(){
 function syncInputs(){
   $('emin').value = Math.round(S.emin * 1000) / 1000;
   $('emax').value = Math.round(S.emax * 1000) / 1000;
+  $('tmin').value = Math.round(S.tmin * 10000) / 10000;
+  $('tmax').value = Math.round(S.tmax * 10000) / 10000;
+  $('timeSlider').value = timeToSlider(S.tcurrent);
+  $('timeCurrentDisplay').textContent = fmt(S.tcurrent);
 }
 
-// ---- 3Dの操作 ----
+var playTimer = null;
+var playStartMs = 0;
+var playStartVal = 0;
+var DURATION = 15000; 
+
+function stopTimePlay() {
+  if (playTimer) cancelAnimationFrame(playTimer);
+  playTimer = null;
+  $('btnPlayTime').textContent = '再生';
+}
+
+function tickTimePlay(timestamp) {
+  if (!playStartMs) playStartMs = timestamp;
+  var elapsed = timestamp - playStartMs;
+  
+  var nextVal = playStartVal + (elapsed / DURATION) * 1000;
+  if (nextVal >= 1000) {
+    nextVal = 1000;
+    $('timeSlider').value = nextVal;
+    S.tcurrent = S.tmax;
+    syncInputs();
+    refresh();
+    stopTimePlay();
+    return;
+  }
+  
+  $('timeSlider').value = nextVal;
+  S.tcurrent = sliderToTime(nextVal);
+  $('timeCurrentDisplay').textContent = fmt(S.tcurrent);
+  refresh();
+  playTimer = requestAnimationFrame(tickTimePlay);
+}
+
+$('btnPlayTime').addEventListener('click', function(){
+  if (playTimer) {
+    stopTimePlay(); 
+  } else {
+    var curVal = parseFloat($('timeSlider').value);
+    if (curVal >= 1000) { curVal = 0; } 
+    playStartVal = curVal;
+    playStartMs = 0;
+    this.textContent = '停止';
+    playTimer = requestAnimationFrame(tickTimePlay);
+  }
+});
+
+$('timeSlider').addEventListener('input', function(){
+  stopTimePlay(); 
+  S.tcurrent = sliderToTime(parseFloat(this.value));
+  $('timeCurrentDisplay').textContent = fmt(S.tcurrent);
+  scheduleRefresh();
+});
+
+Array.prototype.forEach.call(document.querySelectorAll('input[name=ptype]'), function(el){
+  el.addEventListener('change', function(){ if (el.checked) { S.ptype = el.value; refresh(); } });
+});
+
+$('chkAllEv').addEventListener('change', function(){
+  S.showAllEv = this.checked;
+  var ctl = $('evControls');
+  ctl.style.opacity = S.showAllEv ? '0.4' : '1';
+  ctl.style.pointerEvents = S.showAllEv ? 'none' : 'auto';
+  refresh();
+});
+$('evSlider').addEventListener('input', function(){
+  var v = parseInt(this.value, 10);
+  $('evNum').value = v; S.evID = v; scheduleRefresh();
+});
+$('evNum').addEventListener('change', function(){
+  var v = parseInt(this.value, 10);
+  if (isNaN(v)) v = 0;
+  v = clamp(v, 0, MAXEV);
+  this.value = v; $('evSlider').value = v; S.evID = v; refresh();
+});
+
+$('chkAllPix').addEventListener('change', function(){
+  S.showAllPix = this.checked;
+  var ctl = $('pixControls');
+  ctl.style.opacity = S.showAllPix ? '0.4' : '1';
+  ctl.style.pointerEvents = S.showAllPix ? 'none' : 'auto';
+  refresh();
+});
+$('pixSlider').addEventListener('input', function(){
+  var v = parseInt(this.value, 10);
+  $('pixNum').value = v; S.pixID = v; scheduleRefresh();
+});
+$('pixNum').addEventListener('change', function(){
+  var v = parseInt(this.value, 10);
+  if (isNaN(v)) v = 0;
+  v = clamp(v, 0, NTOT - 1);
+  this.value = v; $('pixSlider').value = v; S.pixID = v; refresh();
+});
+
+Array.prototype.forEach.call(document.querySelectorAll('input[name=mode]'), function(el){
+  el.addEventListener('change', function(){ if (el.checked) { S.mode = el.value; draw3D(); } });
+});
+$('thr').addEventListener('change', function(){
+  S.thr = Math.max(0, parseFloat($('thr').value) || 0); buildHist(); refresh();
+});
+$('binw').addEventListener('change', function(){
+  var oldEmax = EMAX;
+  buildHist();
+  if (S.emax >= oldEmax) S.emax = EMAX;
+  if (S.vmax >= oldEmax) S.vmax = EMAX;
+  syncInputs();
+  refresh();
+});
+$('btnLogY').addEventListener('click', function(){
+  S.logy = !S.logy;
+  this.textContent = 'Y軸: ' + (S.logy ? '対数 (Log)' : '線形 (Linear)');
+  drawHist();
+});
+$('btnLogXTime').addEventListener('click', function(){
+  S.logxTime = !S.logxTime;
+  this.textContent = 'X軸: ' + (S.logxTime ? '対数 (Log)' : '線形 (Linear)');
+  drawTimeHist();
+});
+$('btnLogYTime').addEventListener('click', function(){
+  S.logyTime = !S.logyTime;
+  this.textContent = 'Y軸: ' + (S.logyTime ? '対数 (Log)' : '線形 (Linear)');
+  drawTimeHist();
+});
+
+function onRange(){
+  var a = parseFloat($('emin').value), b = parseFloat($('emax').value);
+  if (isNaN(a)) a = 0; if (isNaN(b)) b = EMAX;
+  if (a > b) { var t = a; a = b; b = t; }
+  S.emin = clamp(a, 0, EMAX); S.emax = clamp(b, 0, EMAX); syncInputs(); refresh();
+}
+function onTimeRange(){
+  stopTimePlay();
+  var a = parseFloat($('tmin').value), b = parseFloat($('tmax').value);
+  if (isNaN(a)) a = rawTmin; if (isNaN(b)) b = rawTmax;
+  if (a > b) { var t = a; a = b; b = t; }
+  S.tmin = a; S.tmax = b;
+  S.tcurrent = S.tmax; 
+  syncInputs(); refresh();
+}
+$('emin').addEventListener('change', onRange);
+$('emax').addEventListener('change', onRange);
+$('tmin').addEventListener('change', onTimeRange);
+$('tmax').addEventListener('change', onTimeRange);
+
+$('btnAll').addEventListener('click', function(){
+  S.emin = 0; S.emax = EMAX; S.vmin = 0; S.vmax = EMAX; syncInputs(); refresh();
+});
+$('btnDec').addEventListener('click', function(){ S.emin = 0; S.emax = Math.min(S.thr, EMAX); syncInputs(); refresh(); });
+$('btnImp').addEventListener('click', function(){ S.emin = Math.min(S.thr, EMAX); S.emax = EMAX; syncInputs(); refresh(); });
+$('btnZoom').addEventListener('click', function(){
+  S.vmin = S.emin; S.vmax = Math.min(EMAX, Math.max(S.emax, S.emin + BW * 20)); refresh();
+});
+$('btnAllTime').addEventListener('click', function(){
+  stopTimePlay();
+  S.tmin = rawTmin; S.tmax = rawTmax; S.tcurrent = rawTmax; syncInputs(); refresh();
+});
+
 panels.forEach(function(P){
   var cv = P.cv, drag = null;
   cv.addEventListener('pointerdown', function(e){
@@ -560,7 +1053,6 @@ panels.forEach(function(P){
   cv.addEventListener('dblclick', function(){ S.yaw = YAW0; S.pitch = PITCH0; S.zoom = 1; scheduleDraw3D(); });
 });
 
-// ---- ヒストグラムの操作 ----
 (function(){
   var cv = $('hist'), drag = null;
   function energyAt(e){
@@ -586,29 +1078,37 @@ panels.forEach(function(P){
   }, {passive: false});
 })();
 
-// ---- コントロール ----
-Array.prototype.forEach.call(document.querySelectorAll('input[name=mode]'), function(el){
-  el.addEventListener('change', function(){ if (el.checked) { S.mode = el.value; draw3D(); } });
-});
-$('thr').addEventListener('change', function(){
-  S.thr = Math.max(0, parseFloat($('thr').value) || 0); buildHist(); refresh();
-});
-function onRange(){
-  var a = parseFloat($('emin').value), b = parseFloat($('emax').value);
-  if (isNaN(a)) a = 0; if (isNaN(b)) b = EMAX;
-  if (a > b) { var t = a; a = b; b = t; }
-  S.emin = clamp(a, 0, EMAX); S.emax = clamp(b, 0, EMAX); syncInputs(); refresh();
-}
-$('emin').addEventListener('change', onRange);
-$('emax').addEventListener('change', onRange);
-$('btnAll').addEventListener('click', function(){
-  S.emin = 0; S.emax = EMAX; S.vmin = 0; S.vmax = EMAX; syncInputs(); refresh();
-});
-$('btnDec').addEventListener('click', function(){ S.emin = 0; S.emax = Math.min(S.thr, EMAX); syncInputs(); refresh(); });
-$('btnImp').addEventListener('click', function(){ S.emin = Math.min(S.thr, EMAX); S.emax = EMAX; syncInputs(); refresh(); });
-$('btnZoom').addEventListener('click', function(){
-  S.vmin = S.emin; S.vmax = Math.min(EMAX, Math.max(S.emax, S.emin + BW * 20)); refresh();
-});
+(function(){
+  var cv = $('histTime'), drag = null;
+  function timeAt(e){
+    var r = cv.getBoundingClientRect();
+    var px = e.clientX - r.left - HL;
+    var pw = r.width - HL - HR;
+    var tmin_view = 0, tmax_view = Math.max(rawTmax, 1);
+    if (S.logxTime) {
+      var LMIN = Math.log10(T_EPS);
+      var LMAX = Math.log10(tmax_view + T_EPS);
+      var lt = LMIN + (px / pw) * (LMAX - LMIN);
+      return Math.exp(lt * Math.LN10) - T_EPS;
+    } else {
+      return tmin_view + (px / pw) * (tmax_view - tmin_view);
+    }
+  }
+  cv.addEventListener('pointerdown', function(e){
+    stopTimePlay();
+    drag = timeAt(e); cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener('pointermove', function(e){
+    if (drag === null) return;
+    var cur = timeAt(e);
+    var a = clamp(Math.min(drag, cur), 0, rawTmax);
+    var b = clamp(Math.max(drag, cur), 0, rawTmax);
+    S.tmin = a; S.tmax = b; S.tcurrent = b; 
+    syncInputs(); scheduleRefresh();
+  });
+  cv.addEventListener('pointerup', function(){ drag = null; });
+})();
+
 Array.prototype.forEach.call(document.querySelectorAll('button[data-view]'), function(b){
   b.addEventListener('click', function(){
     var v = VIEWS[b.getAttribute('data-view')];
@@ -620,18 +1120,23 @@ Array.prototype.forEach.call(document.querySelectorAll('input.face'), function(e
 });
 $('alpha').addEventListener('input', function(){ S.alpha = parseInt($('alpha').value, 10) / 100; draw3D(); });
 $('logc').addEventListener('change', function(){ S.logc = $('logc').checked; draw3D(); });
-$('logy').addEventListener('change', function(){ S.logy = $('logy').checked; drawHist(); });
-window.addEventListener('resize', function(){ draw3D(); drawHist(); });
+window.addEventListener('resize', function(){ draw3D(); drawHist(); drawTimeHist(); });
 if (window.matchMedia) {
   var mq = window.matchMedia('(prefers-color-scheme: dark)');
-  if (mq.addEventListener) mq.addEventListener('change', function(){ draw3D(); drawHist(); });
+  if (mq.addEventListener) mq.addEventListener('change', function(){ draw3D(); drawHist(); drawTimeHist(); });
 }
 
-// ---- 初期化 ----
-$('info').textContent = 'ファイル: ' + DATA.file + '　／　イベント数: ' + DATA.nEvents +
-  '　／　ヒット行数: ' + N + '　／　素子 ' + NPIX + '×' + NPIX + ' × 5面（素子 ' + G.size +
-  ' mm、有感部 ' + G.sens + ' mm、ピッチ ' + G.pitch + ' mm）';
+$('info').textContent = 'ファイル: ' + DATA.file + ' ／ イベント数: ' + DATA.nEvents +
+  ' ／ ヒット行数: ' + N + ' ／ 素子 ' + NPIX + '×' + NPIX + ' × 5面';
+
+$('timeInfo').textContent = '記録された時間: 最小 ' + fmt(rawTmin) + ' µs 〜 最大 ' + fmt(rawTmax) + ' µs';
+
 buildHist();
+S.emax = EMAX;
+S.vmax = EMAX;
+$('btnLogY').textContent = 'Y軸: ' + (S.logy ? '対数 (Log)' : '線形 (Linear)');
+$('btnLogXTime').textContent = 'X軸: ' + (S.logxTime ? '対数 (Log)' : '線形 (Linear)');
+$('btnLogYTime').textContent = 'Y軸: ' + (S.logyTime ? '対数 (Log)' : '線形 (Linear)');
 syncInputs();
 refresh();
 })();
@@ -640,9 +1145,6 @@ refresh();
 </html>
 )HTML";
 
-// ---------------------------------------------------------------------------
-// 補助関数
-// ---------------------------------------------------------------------------
 static std::string jsonEscape(const std::string& s)
 {
   std::string out;
@@ -661,7 +1163,6 @@ static std::string jsonEscape(const std::string& s)
   return out;
 }
 
-// ntuple は最上位にあるはずだが、"ntuples/" ディレクトリの中にある場合にも対応する
 static TTree* getTree(TFile* f, const char* name)
 {
   TTree* t = dynamic_cast<TTree*>(f->Get(name));
@@ -669,9 +1170,6 @@ static TTree* getTree(TFile* f, const char* name)
   return t;
 }
 
-// ---------------------------------------------------------------------------
-// 本体
-// ---------------------------------------------------------------------------
 int makeSiViewer(const char* inFile = "SiDetector.root", const char* outFile = "SiViewer.html")
 {
   std::unique_ptr<TFile> f(TFile::Open(inFile, "READ"));
@@ -686,35 +1184,73 @@ int makeSiViewer(const char* inFile = "SiDetector.root", const char* outFile = "
     return 1;
   }
 
-  // --- hits を読み込む ---
-  std::vector<int> evID, pixID;
-  std::vector<double> edep;
+  std::vector<int> evID, pixID, hitPdg;
+  std::vector<double> edep, hitTime;
   {
     TTreeReader reader(hits);
     TTreeReaderValue<Int_t> rEvent(reader, "eventID");
     TTreeReaderValue<Int_t> rPixel(reader, "pixelID");
     TTreeReaderValue<Double_t> rEdep(reader, "edep");
+    
+    TTreeReaderValue<Double_t>* rTime = nullptr;
+    if (hits->GetBranch("time")) {
+      rTime = new TTreeReaderValue<Double_t>(reader, "time");
+    }
+
+    TTreeReaderValue<Int_t>* rPdg = nullptr;
+    if (hits->GetBranch("pdg")) {
+      rPdg = new TTreeReaderValue<Int_t>(reader, "pdg");
+    }
+
     while (reader.Next()) {
       evID.push_back(*rEvent);
       pixID.push_back(*rPixel);
       edep.push_back(*rEdep);
+      hitTime.push_back(rTime ? *(*rTime) : 0.0);
+      hitPdg.push_back(rPdg ? *(*rPdg) : 0);
     }
+    delete rTime;
+    delete rPdg;
   }
 
-  // --- イベント総数 ---
   long long nEvents = 0;
+  long long totalGenAlphas = 0;
+  long long totalGenGammas = 0;
+  long long totalGenElectrons = 0;
+  long long totalGenHeavyIons = 0;
+
   if (TTree* ev = getTree(f.get(), "events")) {
     nEvents = ev->GetEntries();
+    
+    TTreeReader evReader(ev);
+    TTreeReaderValue<Int_t>* rAlphas = ev->GetBranch("nGenAlphas") ? new TTreeReaderValue<Int_t>(evReader, "nGenAlphas") : nullptr;
+    TTreeReaderValue<Int_t>* rGammas = ev->GetBranch("nGenGammas") ? new TTreeReaderValue<Int_t>(evReader, "nGenGammas") : nullptr;
+    TTreeReaderValue<Int_t>* rElectrons = ev->GetBranch("nGenElectrons") ? new TTreeReaderValue<Int_t>(evReader, "nGenElectrons") : nullptr;
+    TTreeReaderValue<Int_t>* rHeavyIons = ev->GetBranch("nGenHeavyIons") ? new TTreeReaderValue<Int_t>(evReader, "nGenHeavyIons") : nullptr;
+
+    while (evReader.Next()) {
+      if (rAlphas) totalGenAlphas += **rAlphas;
+      if (rGammas) totalGenGammas += **rGammas;
+      if (rElectrons) totalGenElectrons += **rElectrons;
+      if (rHeavyIons) totalGenHeavyIons += **rHeavyIons;
+    }
+    delete rAlphas;
+    delete rGammas;
+    delete rElectrons;
+    delete rHeavyIons;
   }
   else if (!evID.empty()) {
     nEvents = *std::max_element(evID.begin(), evID.end()) + 1;
   }
 
-  // --- JSON を組み立てる ---
   std::ostringstream js;
   js << std::setprecision(7);
   js << "{\"file\":\"" << jsonEscape(inFile) << "\"";
   js << ",\"nEvents\":" << nEvents;
+  js << ",\"nGenAlphas\":" << totalGenAlphas;
+  js << ",\"nGenGammas\":" << totalGenGammas;
+  js << ",\"nGenElectrons\":" << totalGenElectrons;
+  js << ",\"nGenHeavyIons\":" << totalGenHeavyIons;
   js << ",\"binWidth\":" << kBinWidth;
   js << ",\"geom\":{\"nPix\":" << kNPix << ",\"pitch\":" << kPitch << ",\"size\":" << kPixSize
      << ",\"sens\":" << kSensSize << ",\"thick\":" << kPixThick << "}";
@@ -724,9 +1260,12 @@ int makeSiViewer(const char* inFile = "SiDetector.root", const char* outFile = "
   for (size_t i = 0; i < pixID.size(); ++i) js << (i ? "," : "") << pixID[i];
   js << "],\"e\":[";
   for (size_t i = 0; i < edep.size(); ++i) js << (i ? "," : "") << edep[i];
+  js << "],\"t\":[";
+  for (size_t i = 0; i < hitTime.size(); ++i) js << (i ? "," : "") << hitTime[i];
+  js << "],\"pdg\":[";
+  for (size_t i = 0; i < hitPdg.size(); ++i) js << (i ? "," : "") << hitPdg[i];
   js << "]}";
 
-  // --- テンプレートに埋め込んで書き出す ---
   std::string html(kHtml);
   const std::string key = "/*DATA_JSON*/null";
   const size_t pos = html.find(key);
@@ -744,8 +1283,7 @@ int makeSiViewer(const char* inFile = "SiDetector.root", const char* outFile = "
   out << html;
   out.close();
 
-  std::cout << "[makeSiViewer] " << outFile << " を作成しました（イベント数 " << nEvents
-            << "、ヒット行数 " << evID.size() << "）" << std::endl;
+  std::cout << "[makeSiViewer] " << outFile << " を作成しました（イベント数 " << nEvents << "）" << std::endl;
   return 0;
 }
 

@@ -7,7 +7,7 @@
 
 #include "G4UserEventAction.hh"
 #include "globals.hh"
-
+#include <vector> // ファイル上部に追加
 #include <array>
 
 namespace B1
@@ -29,13 +29,40 @@ class EventAction : public G4UserEventAction
     static constexpr G4int kNFace = 5;
     static constexpr G4int kNPixelTotal = kNFace * kNPix * kNPix;
 
-    void AddPixelEdep(G4int pixelID, G4double edep)
+    void AddPixelEdep(G4int id, G4double edep, G4double time, G4int pdg)
     {
-      if (pixelID >= 0 && pixelID < kNPixelTotal) fPixelEdep[pixelID] += edep;
+      if (id < 0 || id >= kNPixelTotal) return;
+
+      // 既に「同じピクセル」で「同じ粒子(PDG)」が「ほぼ同時刻(例:1ns以内)」に
+      // エネルギーを落としていれば、同じヒットとみなしてエネルギーを足す
+      for (size_t i = 0; i < fHitPixel.size(); ++i) {
+        if (fHitPixel[i] == id && fHitPdg[i] == pdg && std::abs(fHitTime[i] - time) < 1.0) {
+          fHitEdep[i] += edep;
+          return;
+        }
+      }
+      // 見つからなければ、新しい独立したヒットとして追加（これで重イオンとα線が分離される！）
+      fHitPixel.push_back(id);
+      fHitEdep.push_back(edep);
+      fHitTime.push_back(time);
+      fHitPdg.push_back(pdg);
     }
 
+    void AddGenAlpha() { fNGenAlphas++; }
+    void AddGenGamma() { fNGenGammas++; }
+    void AddGenElectron() { fNGenElectrons++; }
+    void AddGenHeavyIon() { fNGenHeavyIons++; }
+
   private:
-    std::array<G4double, kNPixelTotal> fPixelEdep{};
+    std::vector<G4int> fHitPixel;
+    std::vector<G4double> fHitEdep;
+    std::vector<G4double> fHitTime;
+    std::vector<G4int> fHitPdg;
+    
+    G4int fNGenAlphas = 0;
+    G4int fNGenGammas = 0;
+    G4int fNGenElectrons = 0;
+    G4int fNGenHeavyIons = 0;
 };
 
 }  // namespace B1

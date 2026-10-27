@@ -30,22 +30,31 @@ RunAction::RunAction()
 
   // マルチスレッドでも1つのROOTファイルにまとめる
   analysisManager->SetNtupleMerging(true);
-
-  // ntuple 0: events
+// ntuple 0: events
   analysisManager->CreateNtuple("events", "Event summary");
-  analysisManager->CreateNtupleIColumn("eventID");  // column 0
-  analysisManager->CreateNtupleDColumn("edepTotal");  // column 1 [MeV]
-  analysisManager->CreateNtupleIColumn("nHitPixels");  // column 2
+  analysisManager->CreateNtupleIColumn("eventID");        // column 0
+  analysisManager->CreateNtupleDColumn("edepTotal");      // column 1 [MeV]
+  analysisManager->CreateNtupleIColumn("nHitPixels");     // column 2
+  analysisManager->CreateNtupleIColumn("nGenAlphas");     // column 3
+  analysisManager->CreateNtupleIColumn("nGenGammas");     // column 4
+  analysisManager->CreateNtupleIColumn("nGenElectrons");  // column 5
+  // ↓↓↓ ここを追加 ↓↓↓
+  analysisManager->CreateNtupleIColumn("nGenHeavyIons");  // column 6 (重イオン/原子核の発生数)
+  // ↑↑↑ ここまで ↑↑↑
   analysisManager->FinishNtuple();
 
   // ntuple 1: hits
   analysisManager->CreateNtuple("hits", "Si pixel hits");
   analysisManager->CreateNtupleIColumn("eventID");  // column 0
   analysisManager->CreateNtupleIColumn("pixelID");  // column 1
-  analysisManager->CreateNtupleIColumn("face");  // column 2
-  analysisManager->CreateNtupleIColumn("ix");  // column 3
-  analysisManager->CreateNtupleIColumn("iy");  // column 4
-  analysisManager->CreateNtupleDColumn("edep");  // column 5 [MeV]
+  analysisManager->CreateNtupleIColumn("face");     // column 2
+  analysisManager->CreateNtupleIColumn("ix");       // column 3
+  analysisManager->CreateNtupleIColumn("iy");       // column 4
+  analysisManager->CreateNtupleDColumn("edep");     // column 5 [MeV]
+  analysisManager->CreateNtupleDColumn("time");     // column 6 [us]
+  // ↓↓↓ ここを追加 ↓↓↓
+  analysisManager->CreateNtupleIColumn("pdg");      // column 7 (粒子のPDGコード)
+  // ↑↑↑ ここまで ↑↑↑
   analysisManager->FinishNtuple();
 
   // エネルギーヒストグラム (bin幅 0.25 MeV)

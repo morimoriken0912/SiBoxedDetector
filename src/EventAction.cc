@@ -19,7 +19,15 @@ EventAction::EventAction(RunAction*) {}
 
 void EventAction::BeginOfEventAction(const G4Event*)
 {
-  fPixelEdep.fill(0.);
+  fHitPixel.clear();
+  fHitEdep.clear();
+  fHitTime.clear();
+  fHitPdg.clear();
+  
+  fNGenAlphas = 0;
+  fNGenGammas = 0;
+  fNGenElectrons = 0;
+  fNGenHeavyIons = 0;
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
@@ -29,38 +37,37 @@ void EventAction::EndOfEventAction(const G4Event* event)
   auto analysisManager = G4AnalysisManager::Instance();
 
   const G4int eventID = event->GetEventID();
+  // ベクターに保存された独立したヒットをすべて書き出す
+  G4int nHitPixels = fHitPixel.size(); // ヒットした総数
   G4double edepTotal = 0.;
-  G4int nHitPixels = 0;
 
-  // ntuple 1 ("hits"): エネルギーを落とした素子ごとに1行
-  for (G4int id = 0; id < kNPixelTotal; ++id) {
-    const G4double edep = fPixelEdep[id];
-    if (edep <= 0.) continue;
+  for (size_t i = 0; i < fHitPixel.size(); ++i) {
+    edepTotal += fHitEdep[i];
 
-    ++nHitPixels;
-    edepTotal += edep;
-
-    const G4int face = id / (kNPix * kNPix);
-    const G4int ix = (id % (kNPix * kNPix)) / kNPix;
-    const G4int iy = id % kNPix;
+    G4int face = fHitPixel[i] / 64;
+    G4int ix   = (fHitPixel[i] % 64) / 8;
+    G4int iy   = (fHitPixel[i] % 64) % 8;
 
     analysisManager->FillNtupleIColumn(1, 0, eventID);
-    analysisManager->FillNtupleIColumn(1, 1, id);
+    analysisManager->FillNtupleIColumn(1, 1, fHitPixel[i]);
     analysisManager->FillNtupleIColumn(1, 2, face);
     analysisManager->FillNtupleIColumn(1, 3, ix);
     analysisManager->FillNtupleIColumn(1, 4, iy);
-    analysisManager->FillNtupleDColumn(1, 5, edep / MeV);
-    analysisManager->FillH1(1, edep);  // hEdepPixel (MeV = 1 なので edep をそのまま詰める)
+    analysisManager->FillNtupleDColumn(1, 5, fHitEdep[i] / MeV);
+    analysisManager->FillNtupleDColumn(1, 6, fHitTime[i] / microsecond);
+    analysisManager->FillNtupleIColumn(1, 7, fHitPdg[i]);
+    analysisManager->FillH1(1, fHitEdep[i]);
     analysisManager->AddNtupleRow(1);
   }
 
-  // ヒストグラム hEdepTotal: 1イベントの合計エネルギー損失 (ヒットのあったイベントのみ)
-  if (nHitPixels > 0) analysisManager->FillH1(0, edepTotal);
-
-  // ntuple 0 ("events"): 全イベントについて1行 (ヒットなしのイベントも記録)
+  // eventsツリーへの書き込み（変更なし）
   analysisManager->FillNtupleIColumn(0, 0, eventID);
   analysisManager->FillNtupleDColumn(0, 1, edepTotal / MeV);
   analysisManager->FillNtupleIColumn(0, 2, nHitPixels);
+  analysisManager->FillNtupleIColumn(0, 3, fNGenAlphas);
+  analysisManager->FillNtupleIColumn(0, 4, fNGenGammas);
+  analysisManager->FillNtupleIColumn(0, 5, fNGenElectrons);
+  analysisManager->FillNtupleIColumn(0, 6, fNGenHeavyIons);
   analysisManager->AddNtupleRow(0);
 }
 
