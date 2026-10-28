@@ -107,21 +107,18 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
   //
   // Si pixel detector box
   //
-  // 構成:
-  //   ・1素子 : 7.5 mm x 7.5 mm x 150 um (G4_Si)
-  //             そのうち中央 7.05 mm x 7.05 mm のみが有感部 (SiSensitive)
-  //   ・素子間の隙間 : 0.5 mm  (ピッチ = 8.0 mm)
-  //   ・1面   : 8 x 8 素子 (ピッチ 8.0 mm x 8 = 64 mm)
-  //   ・BOX   : 内側 64 mm の立方体。-z 側の面を開放(ビーム入射口)、
-  //             残り5面 (+z, +x, -x, +y, -y) に検出器を配置
-  //
   G4Material* si_mat = nist->FindOrBuildMaterial("G4_Si");
 
   const G4int nPix = 8;  // 1辺あたりの素子数
   const G4double pixSize = 7.5 * mm;  // 素子の1辺
   const G4double sensSize = 7.05 * mm;  // 有感部の1辺
   const G4double pixGap = 0.5 * mm;  // 素子間の隙間
-  const G4double pixThick = 150 * um;  // 素子の厚さ
+  
+  // ★ 不感層（Dead Layer）の設定
+  const G4double pixThick = 150 * um;            // 素子の全体の厚さ
+  const G4double deadThick = 0.177 * um;         // 表面の不感層の厚さ
+  const G4double sensThick = pixThick - deadThick; // 有感部の厚さ (149.823 um)
+
   const G4double pixPitch = pixSize + pixGap;  // 素子のピッチ (= 8.0 mm)
   const G4double faceSize = nPix * pixPitch;  // 1面の大きさ (= 64 mm)
   const G4double halfFace = 0.5 * faceSize;  // BOX内側の半幅 (= 32 mm)
@@ -132,13 +129,15 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
   auto logicPixel = new G4LogicalVolume(solidPixel, si_mat, "SiElement");
   logicPixel->SetVisAttributes(new G4VisAttributes(G4Colour(0.4, 0.4, 0.8)));
 
-  // 有感部 (素子の中央に配置。厚さは素子と同じ)
-  auto solidSens = new G4Box("SiSensitive", 0.5 * sensSize, 0.5 * sensSize, 0.5 * pixThick);
+  // 有感部 (厚さを sensThick に薄くする)
+  auto solidSens = new G4Box("SiSensitive", 0.5 * sensSize, 0.5 * sensSize, 0.5 * sensThick);
   auto logicSens = new G4LogicalVolume(solidSens, si_mat, "SiSensitive");
   logicSens->SetVisAttributes(new G4VisAttributes(G4Colour(0.0, 0.8, 1.0)));
 
+  // ★ 有感部を +z 方向にシフトさせ、-z 側（表面）に不感層を作る
+  G4double zOffset = 0.5 * deadThick; 
   new G4PVPlacement(nullptr,  // no rotation
-                    G4ThreeVector(),  // 素子の中心
+                    G4ThreeVector(0, 0, zOffset),  // 中心からズラす
                     logicSens,  // its logical volume
                     "SiSensitive",  // its name
                     logicPixel,  // its mother  volume
@@ -146,12 +145,12 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
                     0,  // copy number
                     checkOverlaps);  // overlaps checking
 
-  // 面ごとの回転: 素子の薄い方向(z)を各面の法線方向に向ける
-  G4RotationMatrix rotNone;  // +z 面 (回転なし)
-  G4RotationMatrix rotY90;  // ±x 面 (薄い方向が x)
-  rotY90.rotateY(90. * deg);
-  G4RotationMatrix rotX90;  // ±y 面 (薄い方向が y)
-  rotX90.rotateX(90. * deg);
+  // 面ごとの回転: 素子の「表面(不感層がある -z 側)」がすべて原点(入射側)を向くように設定
+  G4RotationMatrix rotFace0; // +z 面 (回転なし)
+  G4RotationMatrix rotFace1; rotFace1.rotateY(90. * deg);   // +x 面
+  G4RotationMatrix rotFace2; rotFace2.rotateY(-90. * deg);  // -x 面
+  G4RotationMatrix rotFace3; rotFace3.rotateX(-90. * deg);  // +y 面
+  G4RotationMatrix rotFace4; rotFace4.rotateX(90. * deg);   // -y 面
 
   // face: 0=+z(奥), 1=+x, 2=-x, 3=+y, 4=-y
   for (G4int face = 0; face < 5; ++face) {
@@ -162,27 +161,13 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
         G4double v = (j - 0.5 * (nPix - 1)) * pixPitch;
 
         G4ThreeVector pos;
-        G4RotationMatrix rot = rotNone;
+        G4RotationMatrix rot;
         switch (face) {
-          case 0:
-            pos = G4ThreeVector(u, v, +wallOffset);
-            break;
-          case 1:
-            pos = G4ThreeVector(+wallOffset, u, v);
-            rot = rotY90;
-            break;
-          case 2:
-            pos = G4ThreeVector(-wallOffset, u, v);
-            rot = rotY90;
-            break;
-          case 3:
-            pos = G4ThreeVector(u, +wallOffset, v);
-            rot = rotX90;
-            break;
-          case 4:
-            pos = G4ThreeVector(u, -wallOffset, v);
-            rot = rotX90;
-            break;
+          case 0: pos = G4ThreeVector(u, v, +wallOffset); rot = rotFace0; break;
+          case 1: pos = G4ThreeVector(+wallOffset, u, v); rot = rotFace1; break;
+          case 2: pos = G4ThreeVector(-wallOffset, u, v); rot = rotFace2; break;
+          case 3: pos = G4ThreeVector(u, +wallOffset, v); rot = rotFace3; break;
+          case 4: pos = G4ThreeVector(u, -wallOffset, v); rot = rotFace4; break;
         }
 
         // コピー番号 = 面番号*64 + i*8 + j  (0 〜 319) で全素子を一意に識別できる
@@ -201,10 +186,6 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
 
   //
   // PCB (ひとまず厚さ3 mmのプラスチック板)
-  //
-  // BOXの外側の5面に配置する。開放面(-z側)には配置しない。
-  // 板の面内サイズは BOX 内側と同じ (64 mm x 64 mm)。
-  // Si壁と同じ並べ方なので、コーナーで他の板やSiと重ならない。
   //
   G4Material* pcb_mat = nist->FindOrBuildMaterial("G4_POLYETHYLENE");  // 仮の材質
   const G4double pcbThick = 3. * mm;

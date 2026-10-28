@@ -58,7 +58,7 @@ PrimaryGeneratorAction::PrimaryGeneratorAction()
   G4ParticleDefinition* particle = particleTable->FindParticle("gamma");
   fParticleGun->SetParticleDefinition(particle);
   fParticleGun->SetParticleMomentumDirection(G4ThreeVector(0., 0., 1.));
-  fParticleGun->SetParticleEnergy(600. * MeV);
+  fParticleGun->SetParticleEnergy(200. * MeV);
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
@@ -107,7 +107,7 @@ void PrimaryGeneratorAction::GeneratePrimaries(G4Event* event)
       fParticleGun->SetParticleDefinition(ion);
       fParticleGun->SetParticleMomentumDirection(G4ThreeVector(0., 0., 1.));
       // 運動エネルギー(イオン全体の合計)。600 MeV/u の場合は 600. * ionA * MeV
-      fParticleGun->SetParticleEnergy(600. * MeV);
+      fParticleGun->SetParticleEnergy(200. * MeV);
     }
   }
 

@@ -283,6 +283,7 @@ function fmt(v){
   return (absV >= 100 || v === Math.round(v)) ? String(Math.round(v * 100) / 100) : v.toFixed(2); 
 }
 
+// ---- データの範囲 ----
 var rawEmax = 0, MAXEV = 0, rawTmin = Infinity, rawTmax = -Infinity, i;
 for (i = 0; i < N; i++) { 
   if (EN[i] > rawEmax) rawEmax = EN[i]; 
@@ -292,6 +293,15 @@ for (i = 0; i < N; i++) {
 }
 if (!(rawEmax > 0)) rawEmax = 1;
 if (rawTmin === Infinity) { rawTmin = 0; rawTmax = 100; }
+
+// ★ 表示範囲に少し余裕（余白）を持たせる
+var eMargin = rawEmax * 0.05; // エネルギーに5%の余白
+rawEmax += eMargin;
+
+var tMargin = (rawTmax - rawTmin) * 0.05; // 時間に5%の余白
+if (tMargin <= 0) tMargin = 1.0;
+rawTmin = Math.max(0, rawTmin - tMargin); // 時間の最小値は0未満にならないようにする
+rawTmax = rawTmax + tMargin;
 
 var BW = DATA.binWidth || 2.5;
 $('binw').value = BW;
