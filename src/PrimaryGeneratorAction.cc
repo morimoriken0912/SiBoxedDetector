@@ -58,7 +58,7 @@ PrimaryGeneratorAction::PrimaryGeneratorAction()
   G4ParticleDefinition* particle = particleTable->FindParticle("gamma");
   fParticleGun->SetParticleDefinition(particle);
   fParticleGun->SetParticleMomentumDirection(G4ThreeVector(0., 0., 1.));
-  fParticleGun->SetParticleEnergy(200. * MeV);
+  fParticleGun->SetParticleEnergy(600. * MeV);
 }
 
 //....oooOO0OOooo........oooOO0OOooo........oooOO0OOooo........oooOO0OOooo......
@@ -99,17 +99,17 @@ void PrimaryGeneratorAction::GeneratePrimaries(G4Event* event)
 
   // 225Np イオン (Z = 93, A = 225) の設定。
   // 粒子の種類が "nucleus" になっていなければ(= 初回のイベント)ここで設定する。
-  if (fParticleGun->GetParticleDefinition()->GetParticleType() != "nucleus") {
-    const G4int ionZ = 93;
-    const G4int ionA = 225;
-    G4ParticleDefinition* ion = G4IonTable::GetIonTable()->GetIon(ionZ, ionA, 0.);
-    if (ion) {
-      fParticleGun->SetParticleDefinition(ion);
-      fParticleGun->SetParticleMomentumDirection(G4ThreeVector(0., 0., 1.));
+  //if (fParticleGun->GetParticleDefinition()->GetParticleType() != "nucleus") {
+  //  const G4int ionZ = 93;
+  //  const G4int ionA = 225;
+  //  G4ParticleDefinition* ion = G4IonTable::GetIonTable()->GetIon(ionZ, ionA, 0.);
+  //  if (ion) {
+  //    fParticleGun->SetParticleDefinition(ion);
+  //    fParticleGun->SetParticleMomentumDirection(G4ThreeVector(0., 0., 1.));
       // 運動エネルギー(イオン全体の合計)。600 MeV/u の場合は 600. * ionA * MeV
-      fParticleGun->SetParticleEnergy(200. * MeV);
-    }
-  }
+  //    fParticleGun->SetParticleEnergy(600. * MeV);
+  //  }
+//}
 
   // ビーム: 直径 5 cm の円内に一様分布
   const G4double beamRadius = 0.5 * 5. * cm;

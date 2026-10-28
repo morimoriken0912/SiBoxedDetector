@@ -1,12 +1,12 @@
 // makeSiViewer.cc
 //
-// SiDetector.root (Geant4 の出力) を読み込み、Si検出器アレイを3Dで表示する
-// 単体の HTML ファイル (SiViewer.html) を生成する。
+// Reads SiDetector.root (Geant4 output) and visualizes the Si detector array in 3D.
+// Generates a standalone HTML file (SiViewer.html).
 //
-// 使い方 1: ROOT マクロとして実行
+// Usage 1: Run as a ROOT macro
 //   root -l -b -q 'makeSiViewer.cc("SiDetector.root","SiViewer.html")'
 //
-// 使い方 2: コンパイルして実行
+// Usage 2: Compile and run
 //   g++ -O2 -std=c++17 makeSiViewer.cc -o makeSiViewer $(root-config --cflags --libs)
 //   ./makeSiViewer SiDetector.root SiViewer.html
 
@@ -26,24 +26,24 @@
 #include "TTreeReaderValue.h"
 
 // ---------------------------------------------------------------------------
-// 検出器の形状。DetectorConstruction.cc の値と一致させること。
+// Detector geometry parameters. Must match those in DetectorConstruction.cc
 // ---------------------------------------------------------------------------
-static const int kNPix = 8;  // 1面あたり 8 x 8 素子
-static const double kPitch = 8.0;  // 素子のピッチ [mm]
-static const double kPixSize = 7.5;  // 素子の1辺 [mm]
-static const double kSensSize = 7.05;  // 有感部の1辺 [mm]
-static const double kPixThick = 0.15;  // 素子の厚さ [mm]
-static const double kBinWidth = 2.5;   // ヒストグラムのデフォルトビン幅 [MeV]
+static const int kNPix = 8;  // 8 x 8 pixels per face
+static const double kPitch = 8.0;  // Pixel pitch [mm]
+static const double kPixSize = 7.5;  // Pixel size [mm]
+static const double kSensSize = 7.05;  // Sensitive area size [mm]
+static const double kPixThick = 0.15;  // Pixel thickness [mm]
+static const double kBinWidth = 0.1;   // Default histogram bin width [MeV]
 
 // ---------------------------------------------------------------------------
-// HTML テンプレート。/*DATA_JSON*/null の部分にデータを埋め込む。
+// HTML Template. Data will be embedded in place of /*DATA_JSON*/null.
 // ---------------------------------------------------------------------------
 static const char kHtml[] = R"HTML(<!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Si検出器アレイ ビューア</title>
+<title>Si Detector Array Viewer</title>
 <style>
 :root{
   --bg:#ffffff; --fg:#1f2328; --muted:#5f6b7a; --panel:#f3f5f8; --border:#d0d7de;
@@ -82,85 +82,88 @@ canvas{display:block;width:100%}
 </style>
 </head>
 <body>
-<h1>Si検出器アレイ ビューア</h1>
+<h1>Si Detector Array Viewer</h1>
 <div class="sub" id="info"></div>
 
 <div class="controls">
-  <!-- 1段目 -->
+  <!-- Row 1 -->
   <fieldset>
-    <legend>表示する対象と境界</legend>
+    <legend>Display Mode & Threshold</legend>
     <div style="margin-bottom:6px;">
-      <label><input type="radio" name="mode" value="imp">打ち込み</label>
-      <label><input type="radio" name="mode" value="dec">崩壊</label>
-      <label><input type="radio" name="mode" value="all" checked>同時（合算）</label>
-      <label><input type="radio" name="mode" value="split">並べて</label>
+      <label><input type="radio" name="mode" value="imp">Implantation</label>
+      <label><input type="radio" name="mode" value="dec">Decay</label>
+      <label><input type="radio" name="mode" value="all" checked>Both (Sum)</label>
+      <label><input type="radio" name="mode" value="split">Side-by-Side</label>
     </div>
     <div style="border-top: 1px solid var(--border); padding-top: 6px;">
-      <input type="number" id="thr" min="0" step="1" value="100"> MeV 以上を「打ち込み」とする
+      <input type="number" id="thr" min="0" step="1" value="100"> MeV or more as "Implantation"
     </div>
   </fieldset>
   
-  <!-- 2段目 -->
+  <!-- Row 2 -->
   <fieldset>
-    <legend>3D表示設定</legend>
+    <legend>3D Display Settings</legend>
     <div style="margin-bottom:4px;">
-      面：
+      Faces:
       <label><input type="checkbox" class="face" value="0" checked>+z</label>
       <label><input type="checkbox" class="face" value="1" checked>+x</label>
-      <label><input type="checkbox" class="face" value="2" checked>−x</label>
+      <label><input type="checkbox" class="face" value="2" checked>-x</label>
       <label><input type="checkbox" class="face" value="3" checked>+y</label>
-      <label><input type="checkbox" class="face" value="4" checked>−y</label>
+      <label><input type="checkbox" class="face" value="4" checked>-y</label>
     </div>
     <div style="margin-bottom:4px;">
-      <label>不透明度 <input type="range" id="alpha" min="15" max="100" value="100" style="width:80px; vertical-align:middle;"></label>
-      <label><input type="checkbox" id="logc">色を対数</label>
+      <label>Opacity <input type="range" id="alpha" min="15" max="100" value="100" style="width:80px; vertical-align:middle;"></label>
+      <label><input type="checkbox" id="logc">Log Color Scale</label>
     </div>
     <div>
-      視点：
-      <button data-view="in">入口から</button>
-      <button data-view="obl">斜め</button>
-      <button data-view="back">背面</button>
+      Viewpoint:
+      <button data-view="in">Front</button>
+      <button data-view="obl">Oblique</button>
+      <button data-view="back">Back</button>
     </div>
   </fieldset>
 
-  <!-- 粒子選択・検出効率の拡張 -->
+  <!-- Particle Selection -->
   <fieldset style="border-color:#8b5cf6; background:rgba(139,92,246,0.05);">
-    <legend style="color:#8b5cf6; font-weight:bold;">粒子選択・検出効率</legend>
+    <legend style="color:#8b5cf6; font-weight:bold;">Particle Selection & Efficiency</legend>
     <div style="margin-bottom:6px; display:flex; flex-wrap:wrap; gap:4px;">
-      <label><input type="radio" name="ptype" value="all" checked> 全て</label>
-      <label><input type="radio" name="ptype" value="alpha"> α線</label>
-      <label><input type="radio" name="ptype" value="gamma"> γ線</label>
-      <label><input type="radio" name="ptype" value="electron"> ベータ線(e±)</label>
-      <label><input type="radio" name="ptype" value="heavy"> 重イオン</label>
+      <label><input type="radio" name="ptype" value="all" checked> All</label>
+      <label><input type="radio" name="ptype" value="alpha"> Alpha</label>
+      <label><input type="radio" name="ptype" value="gamma"> Gamma</label>
+      <label><input type="radio" name="ptype" value="electron"> Beta (e±)</label>
+      <label><input type="radio" name="ptype" value="heavy"> Heavy Ion</label>
+    </div>
+    <div style="margin-bottom:6px; font-size:12px;">
+      <label><input type="checkbox" id="chkCluster" checked> <b>Enable Clustering</b> (Merge simultaneous multi-pixel hits into one)</label>
     </div>
     <div style="border-top: 1px solid var(--border); padding-top: 4px; line-height:1.3; font-size:12px;" id="effDisplay">
-      検出効率: ---
+      Efficiency: ---
     </div>
   </fieldset>
 
-  <!-- イベント・ピクセル選択統合枠 -->
+  <!-- Event & Pixel Selection -->
   <fieldset style="border-color:#0d9488; background:rgba(13,148,136,0.05);">
-    <legend style="color:#0d9488; font-weight:bold;">イベント・ピクセル選択</legend>
+    <legend style="color:#0d9488; font-weight:bold;">Event & Pixel Selection</legend>
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
       <div>
-        <label><input type="checkbox" id="chkAllEv" checked> <b>全イベントを合算</b></label>
+        <label><input type="checkbox" id="chkAllEv" checked> <b>Sum All Events</b></label>
         <div id="evControls" style="opacity: 0.4; pointer-events: none; margin-top: 8px; display:flex; flex-direction:column; gap:6px;">
           <div>
             eventID: <input type="number" id="evNum" min="0" max="0" value="0">
           </div>
           <div style="display:flex; align-items:center; gap:4px; font-size:12px;">
-            eventID: <input type="range" id="evSlider" min="0" max="0" value="0" style="flex:1;">
+            ID: <input type="range" id="evSlider" min="0" max="0" value="0" style="flex:1;">
           </div>
         </div>
       </div>
       <div>
-        <label><input type="checkbox" id="chkAllPix" checked> <b>全ピクセルを合算</b></label>
+        <label><input type="checkbox" id="chkAllPix" checked> <b>Sum All Pixels</b></label>
         <div id="pixControls" style="opacity: 0.4; pointer-events: none; margin-top: 8px; display:flex; flex-direction:column; gap:6px;">
           <div>
-            pixelID (0〜319): <input type="number" id="pixNum" min="0" max="319" value="0">
+            pixelID (0-319): <input type="number" id="pixNum" min="0" max="319" value="0">
           </div>
           <div style="display:flex; align-items:center; gap:4px; font-size:12px;">
-            pixelID: <input type="range" id="pixSlider" min="0" max="319" value="0" style="flex:1;">
+            ID: <input type="range" id="pixSlider" min="0" max="319" value="0" style="flex:1;">
           </div>
         </div>
       </div>
@@ -175,83 +178,83 @@ canvas{display:block;width:100%}
       <div class="vp" id="vp1" style="display:none"><canvas id="cv1"></canvas></div>
     </div>
     <div class="legend">
-      <span class="swatch"></span><span>0（未検出）</span>
-      <span>1</span><div class="bar" id="bar"></div><span id="lgmax">最大</span>
+      <span class="swatch"></span><span>0 (No Hit)</span>
+      <span>1</span><div class="bar" id="bar"></div><span id="lgmax">Max</span>
       <span id="lgnote"></span>
     </div>
-    <div class="note">3D：ドラッグで回転／ホイールで拡大縮小／ダブルクリックで視点リセット／素子にマウスを載せると詳細を表示。</div>
+    <div class="note">3D: Drag to rotate / Wheel to zoom / Double-click to reset view / Hover over pixels for details.</div>
   </div>
   
   <div style="display:flex; flex-direction:column; gap:12px;">
-    <!-- エネルギーヒストグラム -->
+    <!-- Energy Histogram -->
     <div class="panel">
       <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:6px;">
-        <div style="font-weight:bold;">エネルギー分布</div>
+        <div style="font-weight:bold;">Energy Distribution</div>
         <div style="font-size:12px;">
-          <label style="margin-right:8px;">ビン幅: <input type="number" id="binw" min="0.1" step="0.1" value="2.5" style="width:64px;"> MeV</label>
-          <button id="btnLogY" style="margin:0;">Y軸: 対数 (Log)</button>
+          <label style="margin-right:8px;">Bin Width: <input type="number" id="binw" min="0.1" step="0.1" value="0.1" style="width:64px;"> MeV</label>
+          <button id="btnLogY" style="margin:0;">Y-axis: Log</button>
         </div>
       </div>
       <canvas id="hist"></canvas>
       <div class="stats" id="stats"></div>
 
-      <!-- ★ エネルギー範囲のコントロールをここに移動 -->
       <fieldset style="border-color:#5f6b7a; background:rgba(95,107,122,0.05); margin-top:8px;">
-        <legend style="color:#5f6b7a; font-weight:bold;">エネルギー範囲（ヒットの絞り込み）</legend>
+        <legend style="color:#5f6b7a; font-weight:bold;">Energy Range Filter</legend>
         <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
           <div>
-            <input type="number" id="emin" min="0" step="0.25" style="width:64px;"> 〜
+            <input type="number" id="emin" min="0" step="0.25" style="width:64px;"> -
             <input type="number" id="emax" min="0" step="0.25" style="width:64px;"> MeV
           </div>
           <div>
-            <button id="btnAll">全範囲</button>
-            <button id="btnDec">崩壊の帯</button>
-            <button id="btnImp">打ち込みの帯</button>
-            <button id="btnZoom">選択範囲拡大</button>
+            <button id="btnAll">All Range</button>
+            <button id="btnDec">Decay Range</button>
+            <button id="btnImp">Implantation Range</button>
+            <button id="btnZoom">Zoom Selection</button>
           </div>
         </div>
       </fieldset>
 
-      <div class="note" style="margin-top:6px;">※上のヒストグラムをドラッグしてエネルギー範囲を選択／ホイールで横軸の拡大縮小／縦の破線は境界。</div>
+      <div class="note" style="margin-top:6px;">* Drag on the histogram to select energy range / Wheel to zoom X-axis / Dashed line is threshold.</div>
     </div>
 
-    <!-- 時間ヒストグラム -->
+    <!-- Time Histogram -->
     <div class="panel">
       <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:6px;">
-        <div style="font-weight:bold;">時間分布</div>
+        <div style="font-weight:bold;">Time Distribution</div>
         <div style="font-size:12px;">
-          <button id="btnLogXTime" style="margin:0 4px 0 0;">X軸: 線形 (Linear)</button>
-          <button id="btnLogYTime" style="margin:0;">Y軸: 対数 (Log)</button>
+          <button id="btnLogXTime" style="margin:0 4px 0 0;">X-axis: Linear</button>
+          <button id="btnLogYTime" style="margin:0;">Y-axis: Log</button>
         </div>
       </div>
       <canvas id="histTime"></canvas>
       
       <fieldset style="border-color:#e8710a; background:rgba(232,113,10,0.05); margin-top:12px;">
-        <legend style="color:#e8710a; font-weight:bold;">時間フィルタ・再生（Time Window & Play）</legend>
+        <legend style="color:#e8710a; font-weight:bold;">Time Filter & Playback</legend>
         <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
           <div>
-            対象とする全時間幅:
-            <input type="number" id="tmin" step="0.1"> 〜
+            Time Window:
+            <input type="number" id="tmin" step="0.1"> -
             <input type="number" id="tmax" step="0.1"> µs
           </div>
-          <button id="btnAllTime">全時間リセット</button>
+          <button id="btnAllTime">Reset Time</button>
+          <button id="btnZoomTime">Zoom Selection</button>
           <span class="note" id="timeInfo" style="margin:0;"></span>
         </div>
         <div style="margin-top:8px; display:flex; align-items:center; gap:8px;">
-          <button id="btnPlayTime" style="width:60px; font-weight:bold; color:#e8710a;">再生</button>
+          <button id="btnPlayTime" style="width:60px; font-weight:bold; color:#e8710a;">Play</button>
           <input type="range" id="timeSlider" min="0" max="1000" value="1000" style="flex:1; cursor:pointer;">
           <span style="font-variant-numeric: tabular-nums; width: 140px; text-align:right;">
-            現在: <b id="timeCurrentDisplay" style="color:#e8710a;">0.00</b> µs
+            Current: <b id="timeCurrentDisplay" style="color:#e8710a;">0.00</b> µs
           </span>
         </div>
-        <div class="note" style="margin-top:6px;">※スケールバー（スライダー）は対数スケール（Log）で動きます。再生ボタンで15秒かけてヒットを積算表示します。上のヒストグラムをドラッグして時間範囲を絞ることも可能です。</div>
+        <div class="note" style="margin-top:6px;">* Drag on the histogram to select time range / Wheel to zoom time axis. Slider moves on a logarithmic scale.</div>
       </fieldset>
     </div>
   </div>
 </div>
 <div class="note" id="caveat" style="margin-top:10px;">
-  ※ 1素子のエネルギーが境界エネルギー以上のヒットを「打ち込み」（イオンが止まった素子。同じ素子に入った崩壊のエネルギーも含む）、未満のヒットを「崩壊」としています。<br>
-  ※ 粒子選択で「α線」を絞り込んだ場合、そのα線のみのヒット情報に基づきカウントされます。
+  * Hits with energy &ge; threshold are classified as 'Implantation' (including decay energy in the same pixel). Hits &lt; threshold are 'Decay'.<br>
+  * When a specific particle is selected, counts and efficiency are strictly based on hits from that particle.
 </div>
 <div id="tip"></div>
 
@@ -264,7 +267,7 @@ var G = DATA.geom;
 var EV = DATA.ev, PIX = DATA.pix, EN = DATA.e, T = DATA.t, PDG = DATA.pdg;
 var N = PIX.length;
 var NPIX = G.nPix, NPF = NPIX * NPIX, NFACE = 5, NTOT = NFACE * NPF;
-var FACE_NAMES = ['+z（奥の壁）', '+x（側面）', '−x（側面）', '+y（側面）', '−y（側面）'];
+var FACE_NAMES = ['+z (Back)', '+x (Side)', '-x (Side)', '+y (Side)', '-y (Side)'];
 var VH = 520;
 var HH = 220;
 var HL = 64, HR = 12, HT = 14, HB = 34;
@@ -283,7 +286,7 @@ function fmt(v){
   return (absV >= 100 || v === Math.round(v)) ? String(Math.round(v * 100) / 100) : v.toFixed(2); 
 }
 
-// ---- データの範囲 ----
+// ---- Data Ranges ----
 var rawEmax = 0, MAXEV = 0, rawTmin = Infinity, rawTmax = -Infinity, i;
 for (i = 0; i < N; i++) { 
   if (EN[i] > rawEmax) rawEmax = EN[i]; 
@@ -294,16 +297,16 @@ for (i = 0; i < N; i++) {
 if (!(rawEmax > 0)) rawEmax = 1;
 if (rawTmin === Infinity) { rawTmin = 0; rawTmax = 100; }
 
-// ★ 表示範囲に少し余裕（余白）を持たせる
-var eMargin = rawEmax * 0.05; // エネルギーに5%の余白
+// Add 5% margin to ranges for better visibility
+var eMargin = rawEmax * 0.05; 
 rawEmax += eMargin;
 
-var tMargin = (rawTmax - rawTmin) * 0.05; // 時間に5%の余白
+var tMargin = (rawTmax - rawTmin) * 0.05; 
 if (tMargin <= 0) tMargin = 1.0;
-rawTmin = Math.max(0, rawTmin - tMargin); // 時間の最小値は0未満にならないようにする
+rawTmin = Math.max(0, rawTmin - tMargin); 
 rawTmax = rawTmax + tMargin;
 
-var BW = DATA.binWidth || 2.5;
+var BW = DATA.binWidth || 0.1;
 $('binw').value = BW;
 var EMAX = rawEmax;
 var NB = 1;
@@ -314,11 +317,13 @@ $('pixNum').max = NTOT - 1;
 $('pixSlider').max = NTOT - 1;
 
 var S = {
-  ptype: 'all', // 'all', 'alpha', 'gamma', 'electron', 'heavy'
+  ptype: 'all', 
+  clustering: true,
   showAllEv: true, evID: 0,
   showAllPix: true, pixID: 0,
   mode: 'all', thr: 100, emin: 0, emax: EMAX, vmin: 0, vmax: EMAX,
   tmin: rawTmin, tmax: rawTmax, tcurrent: rawTmax,
+  vtmin: rawTmin, vtmax: rawTmax, 
   logxTime: false, logyTime: true,
   yaw: 190 * Math.PI / 180, pitch: 10 * Math.PI / 180, zoom: 1,
   faceOn: [true, true, true, true, true], alpha: 1, logc: false, logy: true
@@ -343,12 +348,12 @@ function sliderToTime(v) {
   return clamp(Math.exp(lt) - T_EPS, S.tmin, S.tmax);
 }
 
-// 粒子判定ヘルパー
+// Particle ID Helper
 function getParticleCategory(pdg) {
   if (pdg === 1000020040) return 'alpha';
   if (pdg === 22) return 'gamma';
   if (pdg === 11 || pdg === -11) return 'electron';
-  if (pdg === 1000932250) return 'heavy'; // 225Np イオン（ビーム粒子）
+  if (pdg === 1000862040) return 'heavy'; // 2204Rn Ion
   return 'other';
 }
 
@@ -393,6 +398,9 @@ var HIST_IMP = null, HIST_DEC = null;
 function computeCounts(){
   C.imp.fill(0); C.dec.fill(0); C.detCounts = 0;
   EVSEEN.imp.fill(0); EVSEEN.dec.fill(0);
+  
+  var uniqueHits = {}; 
+
   var k;
   for (k = 0; k < N; k++) {
     var pdgCode = PDG ? PDG[k] : 0;
@@ -408,14 +416,25 @@ function computeCounts(){
     
     if (p < 0 || p >= NTOT) continue;
 
-    C.detCounts++;
+    // Clustering: merge hits from the same particle, event, and time (0.01us resolution)
+    if (S.clustering) {
+      var tKey = Math.floor(t * 100); 
+      var uniqKey = EV[k] + "_" + pdgCode + "_" + tKey;
+      if (!uniqueHits[uniqKey]) {
+        uniqueHits[uniqKey] = true;
+        C.detCounts++; 
+      }
+    } else {
+      C.detCounts++;
+    }
 
     if (e >= S.thr) { C.imp[p]++; EVSEEN.imp[EV[k]] = 1; }
     else            { C.dec[p]++; EVSEEN.dec[EV[k]] = 1; }
   }
 }
+
 function buildHist(){
-  BW = Math.max(0.01, parseFloat($('binw').value) || DATA.binWidth || 2.5);
+  BW = Math.max(0.01, parseFloat($('binw').value) || DATA.binWidth || 0.1);
   EMAX = Math.ceil(rawEmax / BW) * BW;
   NB = Math.round(EMAX / BW) + 1;
   HIST_IMP = new Float64Array(NB); HIST_DEC = new Float64Array(NB);
@@ -533,7 +552,7 @@ function drawPanel(P, max){
   ctx.lineTo(b[0] - 9*Math.cos(ang + 0.4), b[1] - 9*Math.sin(ang + 0.4));
   ctx.closePath(); ctx.fill();
   ctx.font = '12px system-ui, sans-serif';
-  ctx.fillText('ビーム', a[0] + 6, a[1] - 6);
+  ctx.fillText('Beam', a[0] + 6, a[1] - 6);
 
   var ax = [['x', [1,0,0], '#d1382b'], ['y', [0,1,0], '#2c9a3f'], ['z', [0,0,1], '#2b6fd6']];
   var ox = 46, oy = H - 40, q;
@@ -551,11 +570,11 @@ function draw3D(){
   var split = S.mode === 'split';
   $('vp1').style.display = split ? 'block' : 'none';
   
-  var labEv = S.showAllEv ? '' : '（Event ' + S.evID + '）';
+  var labEv = S.showAllEv ? '' : ' (Event ' + S.evID + ')';
   var lab = {
-    imp: '打ち込み' + labEv,
-    dec: '崩壊' + labEv,
-    all: '同時表示' + labEv
+    imp: 'Implantation' + labEv,
+    dec: 'Decay' + labEv,
+    all: 'Both (Sum)' + labEv
   };
   panels[0].cat = split ? 'imp' : S.mode;
   panels[1].cat = 'dec';
@@ -570,8 +589,8 @@ function updateLegend(max){
   var stops = [], k;
   for (k = 0; k <= 8; k++) stops.push('hsl(' + (240 * (1 - k / 8)) + ',90%,50%)');
   $('bar').style.background = 'linear-gradient(to right,' + stops.join(',') + ')';
-  $('lgmax').textContent = max > 0 ? String(max) : '（該当なし）';
-  $('lgnote').textContent = S.logc ? '（対数スケール）' : '（線形スケール）';
+  $('lgmax').textContent = max > 0 ? String(max) : '(N/A)';
+  $('lgnote').textContent = S.logc ? '(Log Scale)' : '(Linear Scale)';
 }
 
 var tip = $('tip');
@@ -582,8 +601,8 @@ function showTip(P, e){
   var el = h.el;
   tip.textContent =
     'pixelID ' + el.id + '\n' + FACE_NAMES[el.face] + '  ix=' + el.ix + ', iy=' + el.iy + '\n' +
-    '中心 (' + el.c.map(function(v){ return v.toFixed(1); }).join(', ') + ') mm\n' +
-    '現在の表示での検出数\n  打ち込み ' + C.imp[el.id] + ' ／ 崩壊 ' + C.dec[el.id];
+    'Center (' + el.c.map(function(v){ return v.toFixed(1); }).join(', ') + ') mm\n' +
+    'Counts in current view\n  Implantation: ' + C.imp[el.id] + ' / Decay: ' + C.dec[el.id];
   tip.style.left = (e.clientX + 14) + 'px';
   tip.style.top = (e.clientY + 14) + 'px';
   tip.style.display = 'block';
@@ -664,18 +683,18 @@ function drawHist(){
   ctx.strokeStyle = muted; ctx.lineWidth = 1; ctx.strokeRect(HL, HT, pw, ph);
   ctx.fillStyle = fg; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   ctx.font = '12px system-ui, sans-serif';
-  ctx.fillText('エネルギー [MeV]', HL + pw / 2, H - 6);
+  ctx.fillText('Energy [MeV]', HL + pw / 2, H - 6);
   
   ctx.save();
   ctx.translate(16, HT + ph / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.textAlign = 'center';
-  ctx.fillText('ヒット数 (counts)' + (S.logy ? ' (対数)' : ''), 0, 0);
+  ctx.fillText('Counts' + (S.logy ? ' (Log)' : ''), 0, 0);
   ctx.restore();
 
   ctx.textAlign = 'right';
-  ctx.fillStyle = cImp; ctx.fillText('■ 打ち込み', HL + pw - 78, HT + 14);
-  ctx.fillStyle = cDec; ctx.fillText('■ 崩壊', HL + pw - 8, HT + 14);
+  ctx.fillStyle = cImp; ctx.fillText('■ Implantation', HL + pw - 78, HT + 14);
+  ctx.fillStyle = cDec; ctx.fillText('■ Decay', HL + pw - 8, HT + 14);
 }
 
 function drawTimeHist() {
@@ -684,11 +703,11 @@ function drawTimeHist() {
   ctx.globalAlpha = 1;
   ctx.fillStyle = css('--cbg'); ctx.fillRect(0, 0, W, H);
   
-  var tmin_view = 0;
-  var tmax_view = Math.max(rawTmax, 1);
+  var tmin_view = S.vtmin;
+  var tmax_view = Math.max(S.vtmax, S.vtmin + 1e-9);
   
   var logX = S.logxTime;
-  var LMIN = Math.log10(T_EPS);
+  var LMIN = Math.log10(tmin_view + T_EPS);
   var LMAX = Math.log10(tmax_view + T_EPS);
   
   function xOf(t) {
@@ -793,18 +812,18 @@ function drawTimeHist() {
   ctx.strokeStyle = muted; ctx.lineWidth = 1; ctx.strokeRect(HL, HT, pw, ph);
   ctx.fillStyle = fg; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   ctx.font = '12px system-ui, sans-serif';
-  ctx.fillText('時間 [µs]' + (S.logxTime ? ' (対数)' : ''), HL + pw / 2, H - 6);
+  ctx.fillText('Time [µs]' + (S.logxTime ? ' (Log)' : ''), HL + pw / 2, H - 6);
   
   ctx.save();
   ctx.translate(16, HT + ph / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.textAlign = 'center';
-  ctx.fillText('ヒット数 (counts)' + (S.logyTime ? ' (対数)' : ''), 0, 0);
+  ctx.fillText('Counts' + (S.logyTime ? ' (Log)' : ''), 0, 0);
   ctx.restore();
 
   ctx.textAlign = 'right';
-  ctx.fillStyle = cImp; ctx.fillText('■ 打ち込み', HL + pw - 78, HT + 14);
-  ctx.fillStyle = cDec; ctx.fillText('■ 崩壊', HL + pw - 8, HT + 14);
+  ctx.fillStyle = cImp; ctx.fillText('■ Implantation', HL + pw - 78, HT + 14);
+  ctx.fillStyle = cDec; ctx.fillText('■ Decay', HL + pw - 8, HT + 14);
 }
 
 function updateStats(){
@@ -822,17 +841,17 @@ function updateStats(){
   }
   
   var evText = S.showAllEv 
-    ? 'ヒットイベント：<b>' + evA + '</b> / ' + DATA.nEvents + '（打ち込み ' + evI + '、崩壊 ' + evD + '）'
-    : '表示中のイベント: <b>Event ' + S.evID + '</b>';
+    ? 'Hit Events: <b>' + evA + '</b> / ' + DATA.nEvents + ' (Implantation ' + evI + ', Decay ' + evD + ')'
+    : 'Showing Event: <b>Event ' + S.evID + '</b>';
 
   var pixText = S.showAllPix 
-    ? '検出した素子：<b>' + det + '</b> / ' + NTOT + '<br>'
-    : '表示中の素子：<b>pixelID ' + S.pixID + '</b> のみ<br>';
+    ? 'Hit Pixels: <b>' + det + '</b> / ' + NTOT + '<br>'
+    : 'Showing Pixel: <b>pixelID ' + S.pixID + '</b> only<br>';
 
   $('stats').innerHTML =
-    '選択範囲 <b>' + fmt(S.emin) + '〜' + fmt(S.emax) + ' MeV</b> ／ ' +
-    '積算時間 <b>' + fmt(S.tmin) + '〜' + fmt(S.tcurrent) + ' µs</b> <span style="color:#888;">(設定枠: ' + fmt(S.tmax) + ' µs)</span><br>' +
-    'ヒット数：打ち込み <b>' + nImp + '</b> ／ 崩壊 <b>' + nDec + '</b><br>' +
+    'Selected Energy: <b>' + fmt(S.emin) + ' - ' + fmt(S.emax) + ' MeV</b> / ' +
+    'Time Window: <b>' + fmt(S.tmin) + ' - ' + fmt(S.tcurrent) + ' µs</b> <span style="color:#888;">(Max ' + fmt(S.tmax) + ' µs)</span><br>' +
+    'Hits: Implantation <b>' + nImp + '</b> / Decay <b>' + nDec + '</b><br>' +
     pixText +
     evText;
 
@@ -842,26 +861,26 @@ function updateStats(){
   
   if (ptype === 'alpha') { 
     genTotal = DATA.nGenAlphas; 
-    pLabel = "α線"; 
+    pLabel = "Alpha"; 
   }
   else if (ptype === 'gamma') { 
     genTotal = DATA.nGenGammas; 
-    pLabel = "γ線"; 
+    pLabel = "Gamma"; 
   }
   else if (ptype === 'electron') { 
     genTotal = DATA.nGenElectrons; 
-    pLabel = "ベータ線(e±)"; 
+    pLabel = "Beta (e±)"; 
   }
   else if (ptype === 'heavy') { 
     genTotal = DATA.nEvents; 
-    pLabel = "重イオン(ビーム)"; 
+    pLabel = "Heavy Ion (Beam)"; 
   }
 
   if (ptype !== 'all') {
     var eff = genTotal > 0 ? (C.detCounts / genTotal * 100).toFixed(2) : "0.00";
-    $('effDisplay').innerHTML = pLabel + ' 検出効率: <b>' + eff + '%</b><br><span style="font-size:11px;color:#888;">(検出: ' + C.detCounts + ' / 基準総数: ' + genTotal + ')</span>';
+    $('effDisplay').innerHTML = pLabel + ' Efficiency: <b>' + eff + '%</b><br><span style="font-size:11px;color:#888;">(Detected: ' + C.detCounts + ' / Generated: ' + genTotal + ')</span>';
   } else {
-    $('effDisplay').innerHTML = '検出効率: 粒子を選択してください';
+    $('effDisplay').innerHTML = 'Efficiency: Please select a particle';
   }
 }
 
@@ -892,7 +911,7 @@ var DURATION = 15000;
 function stopTimePlay() {
   if (playTimer) cancelAnimationFrame(playTimer);
   playTimer = null;
-  $('btnPlayTime').textContent = '再生';
+  $('btnPlayTime').textContent = 'Play';
 }
 
 function tickTimePlay(timestamp) {
@@ -925,7 +944,7 @@ $('btnPlayTime').addEventListener('click', function(){
     if (curVal >= 1000) { curVal = 0; } 
     playStartVal = curVal;
     playStartMs = 0;
-    this.textContent = '停止';
+    this.textContent = 'Stop';
     playTimer = requestAnimationFrame(tickTimePlay);
   }
 });
@@ -939,6 +958,11 @@ $('timeSlider').addEventListener('input', function(){
 
 Array.prototype.forEach.call(document.querySelectorAll('input[name=ptype]'), function(el){
   el.addEventListener('change', function(){ if (el.checked) { S.ptype = el.value; refresh(); } });
+});
+
+$('chkCluster').addEventListener('change', function(){
+  S.clustering = this.checked;
+  refresh();
 });
 
 $('chkAllEv').addEventListener('change', function(){
@@ -993,17 +1017,17 @@ $('binw').addEventListener('change', function(){
 });
 $('btnLogY').addEventListener('click', function(){
   S.logy = !S.logy;
-  this.textContent = 'Y軸: ' + (S.logy ? '対数 (Log)' : '線形 (Linear)');
+  this.textContent = 'Y-axis: ' + (S.logy ? 'Log' : 'Linear');
   drawHist();
 });
 $('btnLogXTime').addEventListener('click', function(){
   S.logxTime = !S.logxTime;
-  this.textContent = 'X軸: ' + (S.logxTime ? '対数 (Log)' : '線形 (Linear)');
+  this.textContent = 'X-axis: ' + (S.logxTime ? 'Log' : 'Linear');
   drawTimeHist();
 });
 $('btnLogYTime').addEventListener('click', function(){
   S.logyTime = !S.logyTime;
-  this.textContent = 'Y軸: ' + (S.logyTime ? '対数 (Log)' : '線形 (Linear)');
+  this.textContent = 'Y-axis: ' + (S.logyTime ? 'Log' : 'Linear');
   drawTimeHist();
 });
 
@@ -1035,9 +1059,18 @@ $('btnImp').addEventListener('click', function(){ S.emin = Math.min(S.thr, EMAX)
 $('btnZoom').addEventListener('click', function(){
   S.vmin = S.emin; S.vmax = Math.min(EMAX, Math.max(S.emax, S.emin + BW * 20)); refresh();
 });
+
+$('btnZoomTime').addEventListener('click', function(){
+  S.vtmin = S.tmin; 
+  S.vtmax = Math.max(S.tmax, S.tmin + 0.05); 
+  refresh();
+});
+
 $('btnAllTime').addEventListener('click', function(){
   stopTimePlay();
-  S.tmin = rawTmin; S.tmax = rawTmax; S.tcurrent = rawTmax; syncInputs(); refresh();
+  S.tmin = rawTmin; S.tmax = rawTmax; S.tcurrent = rawTmax; 
+  S.vtmin = rawTmin; S.vtmax = rawTmax; 
+  syncInputs(); refresh();
 });
 
 panels.forEach(function(P){
@@ -1094,9 +1127,9 @@ panels.forEach(function(P){
     var r = cv.getBoundingClientRect();
     var px = e.clientX - r.left - HL;
     var pw = r.width - HL - HR;
-    var tmin_view = 0, tmax_view = Math.max(rawTmax, 1);
+    var tmin_view = S.vtmin, tmax_view = S.vtmax; 
     if (S.logxTime) {
-      var LMIN = Math.log10(T_EPS);
+      var LMIN = Math.log10(tmin_view + T_EPS);
       var LMAX = Math.log10(tmax_view + T_EPS);
       var lt = LMIN + (px / pw) * (LMAX - LMIN);
       return Math.exp(lt * Math.LN10) - T_EPS;
@@ -1117,6 +1150,15 @@ panels.forEach(function(P){
     syncInputs(); scheduleRefresh();
   });
   cv.addEventListener('pointerup', function(){ drag = null; });
+  
+  cv.addEventListener('wheel', function(e){
+    e.preventDefault();
+    var c = timeAt(e), f = e.deltaY > 0 ? 1.25 : 0.8;
+    var nr = clamp((S.vtmax - S.vtmin) * f, 0.01, (rawTmax - rawTmin + 10) * 5);
+    var rel = (c - S.vtmin) / (S.vtmax - S.vtmin);
+    var nmin = c - rel * nr;
+    S.vtmin = nmin; S.vtmax = nmin + nr; scheduleRefresh();
+  }, {passive: false});
 })();
 
 Array.prototype.forEach.call(document.querySelectorAll('button[data-view]'), function(b){
@@ -1136,17 +1178,17 @@ if (window.matchMedia) {
   if (mq.addEventListener) mq.addEventListener('change', function(){ draw3D(); drawHist(); drawTimeHist(); });
 }
 
-$('info').textContent = 'ファイル: ' + DATA.file + ' ／ イベント数: ' + DATA.nEvents +
-  ' ／ ヒット行数: ' + N + ' ／ 素子 ' + NPIX + '×' + NPIX + ' × 5面';
+$('info').textContent = 'File: ' + DATA.file + ' / Events: ' + DATA.nEvents +
+  ' / Hit rows: ' + N + ' / Pixels: ' + NPIX + 'x' + NPIX + ' x 5 faces';
 
-$('timeInfo').textContent = '記録された時間: 最小 ' + fmt(rawTmin) + ' µs 〜 最大 ' + fmt(rawTmax) + ' µs';
+$('timeInfo').textContent = 'Recorded Time: Min ' + fmt(rawTmin) + ' µs to Max ' + fmt(rawTmax) + ' µs';
 
 buildHist();
 S.emax = EMAX;
 S.vmax = EMAX;
-$('btnLogY').textContent = 'Y軸: ' + (S.logy ? '対数 (Log)' : '線形 (Linear)');
-$('btnLogXTime').textContent = 'X軸: ' + (S.logxTime ? '対数 (Log)' : '線形 (Linear)');
-$('btnLogYTime').textContent = 'Y軸: ' + (S.logyTime ? '対数 (Log)' : '線形 (Linear)');
+$('btnLogY').textContent = 'Y-axis: ' + (S.logy ? 'Log' : 'Linear');
+$('btnLogXTime').textContent = 'X-axis: ' + (S.logxTime ? 'Log' : 'Linear');
+$('btnLogYTime').textContent = 'Y-axis: ' + (S.logyTime ? 'Log' : 'Linear');
 syncInputs();
 refresh();
 })();
@@ -1184,13 +1226,13 @@ int makeSiViewer(const char* inFile = "SiDetector.root", const char* outFile = "
 {
   std::unique_ptr<TFile> f(TFile::Open(inFile, "READ"));
   if (!f || f->IsZombie()) {
-    std::cerr << "[makeSiViewer] ファイルを開けません: " << inFile << std::endl;
+    std::cerr << "[makeSiViewer] Cannot open file: " << inFile << std::endl;
     return 1;
   }
 
   TTree* hits = getTree(f.get(), "hits");
   if (!hits) {
-    std::cerr << "[makeSiViewer] ntuple \"hits\" が見つかりません。" << std::endl;
+    std::cerr << "[makeSiViewer] Ntuple \"hits\" not found." << std::endl;
     return 1;
   }
 
@@ -1280,20 +1322,20 @@ int makeSiViewer(const char* inFile = "SiDetector.root", const char* outFile = "
   const std::string key = "/*DATA_JSON*/null";
   const size_t pos = html.find(key);
   if (pos == std::string::npos) {
-    std::cerr << "[makeSiViewer] テンプレートにデータの挿入位置がありません。" << std::endl;
+    std::cerr << "[makeSiViewer] Data insertion point not found in template." << std::endl;
     return 1;
   }
   html.replace(pos, key.size(), js.str());
 
   std::ofstream out(outFile, std::ios::binary);
   if (!out) {
-    std::cerr << "[makeSiViewer] 出力ファイルを作れません: " << outFile << std::endl;
+    std::cerr << "[makeSiViewer] Cannot create output file: " << outFile << std::endl;
     return 1;
   }
   out << html;
   out.close();
 
-  std::cout << "[makeSiViewer] " << outFile << " を作成しました（イベント数 " << nEvents << "）" << std::endl;
+  std::cout << "[makeSiViewer] Created " << outFile << " (Events: " << nEvents << ")" << std::endl;
   return 0;
 }
 
